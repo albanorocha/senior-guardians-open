@@ -145,7 +145,7 @@ const CheckIn = () => {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
         },
-        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402', variables }),
+        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402', variables, userId: user?.id }),
       });
 
       const data = await res.json();

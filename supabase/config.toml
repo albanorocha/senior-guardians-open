@@ -1,1 +1,4 @@
 project_id = "rlbratdaqtdpbifkceds"
+
+[functions.atoms-precall]
+verify_jwt = false
