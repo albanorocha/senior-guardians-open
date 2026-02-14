@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AtomsWidget } from 'atoms-widget-core';
+import { AtomsClient } from 'atoms-client-sdk';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -36,6 +36,7 @@ const CheckIn = () => {
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const atomsClientRef = useRef<AtomsClient | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -62,13 +63,61 @@ const CheckIn = () => {
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
-  const handleAnswer = () => {
+  const handleAnswer = async () => {
     setCallStart(new Date());
     setCallState('active');
+
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402' }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to start session');
+      }
+
+      const client = new AtomsClient();
+      atomsClientRef.current = client;
+
+      client.on('session_started', () => {
+        console.log('Atoms voice session started');
+      });
+
+      client.on('session_ended', () => {
+        console.log('Atoms voice session ended');
+      });
+
+      await client.startSession({
+        accessToken: data.data.token,
+        mode: 'webcall',
+        host: data.data.host,
+      });
+    } catch (err: any) {
+      console.error('Failed to start voice session:', err);
+      toast({
+        title: 'Erro ao iniciar chamada',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleEndCall = () => {
     clearInterval(timerRef.current);
+    if (atomsClientRef.current) {
+      atomsClientRef.current.stopSession();
+      atomsClientRef.current = null;
+    }
     setCallState('summary');
   };
 
@@ -171,15 +220,6 @@ const CheckIn = () => {
             <p className="text-senior-sm opacity-70 mt-2 max-w-sm text-center">
               Voice check-in in progress. Speak naturally with Clara about your medications.
             </p>
-
-            {/* Atoms Voice Widget */}
-            <div className="mt-6 w-full max-w-sm">
-              <AtomsWidget
-                assistantId="6990ef650d1c87f0c9a42402"
-                mode="voice"
-                accentColor="#4A90A4"
-              />
-            </div>
 
             <Button
               onClick={handleEndCall}
