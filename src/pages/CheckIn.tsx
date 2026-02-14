@@ -102,6 +102,40 @@ const CheckIn = () => {
         atomsClientRef.current = null;
       }
 
+      // Fetch patient profile
+      let patientName = 'Patient';
+      let patientAge: number | null = null;
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, age')
+          .eq('id', user.id)
+          .single();
+        if (profile) {
+          patientName = profile.full_name || 'Patient';
+          patientAge = profile.age;
+        }
+      }
+
+      // Format medications string
+      let medicationsStr = 'No medications registered.';
+      if (medications.length > 0) {
+        medicationsStr = medications.map((med, i) => {
+          const parts = [`${i + 1}. ${med.name} - ${med.dosage}, ${med.frequency}`];
+          if (med.instructions) parts.push(`Instructions: ${med.instructions}`);
+          return parts.join('. ');
+        }).join('\n');
+      }
+
+      const now = new Date();
+      const variables = {
+        patient_name: patientName,
+        patient_age: patientAge ?? 'unknown',
+        medications: medicationsStr,
+        current_date: now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+        current_time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+      };
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
@@ -111,7 +145,7 @@ const CheckIn = () => {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
         },
-        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402' }),
+        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402', variables }),
       });
 
       const data = await res.json();

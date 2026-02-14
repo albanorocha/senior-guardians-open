@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { agentId } = await req.json();
+    const { agentId, variables } = await req.json();
 
     if (!agentId) {
       return new Response(JSON.stringify({ error: 'agentId is required' }), {
@@ -28,13 +28,18 @@ serve(async (req) => {
       });
     }
 
+    const requestBody: Record<string, unknown> = { agentId };
+    if (variables && typeof variables === 'object') {
+      requestBody.variables = variables;
+    }
+
     const response = await fetch('https://atoms-api.smallest.ai/api/v1/conversation/webcall', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ agentId }),
+      body: JSON.stringify(requestBody),
     });
 
     const data = await response.json();
