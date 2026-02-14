@@ -35,8 +35,20 @@ const CheckIn = () => {
   const [mood, setMood] = useState<Mood>('neutral');
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const atomsClientRef = useRef<AtomsClient | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current);
+      if (atomsClientRef.current) {
+        try { atomsClientRef.current.stopSession(); } catch {}
+        atomsClientRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -63,11 +75,33 @@ const CheckIn = () => {
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const handleEndCall = async () => {
+    clearInterval(timerRef.current);
+    if (atomsClientRef.current) {
+      try {
+        await atomsClientRef.current.stopSession();
+      } catch (err) {
+        console.error('Error stopping session:', err);
+      }
+      atomsClientRef.current = null;
+    }
+    setConnecting(false);
+    setCallState('summary');
+  };
+
   const handleAnswer = async () => {
+    if (connecting) return;
+    setConnecting(true);
     setCallStart(new Date());
     setCallState('active');
 
     try {
+      // Stop any previous session
+      if (atomsClientRef.current) {
+        try { atomsClientRef.current.stopSession(); } catch {}
+        atomsClientRef.current = null;
+      }
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
@@ -91,10 +125,12 @@ const CheckIn = () => {
 
       client.on('session_started', () => {
         console.log('Atoms voice session started');
+        setConnecting(false);
       });
 
       client.on('session_ended', () => {
-        console.log('Atoms voice session ended');
+        console.log('Atoms voice session ended by agent');
+        handleEndCall();
       });
 
       await client.startSession({
@@ -104,21 +140,14 @@ const CheckIn = () => {
       });
     } catch (err: any) {
       console.error('Failed to start voice session:', err);
+      setConnecting(false);
+      setCallState('incoming');
       toast({
         title: 'Erro ao iniciar chamada',
         description: err.message,
         variant: 'destructive',
       });
     }
-  };
-
-  const handleEndCall = () => {
-    clearInterval(timerRef.current);
-    if (atomsClientRef.current) {
-      atomsClientRef.current.stopSession();
-      atomsClientRef.current = null;
-    }
-    setCallState('summary');
   };
 
   const handleSave = async () => {
@@ -199,8 +228,9 @@ const CheckIn = () => {
               </Button>
               <Button
                 onClick={handleAnswer}
+                disabled={connecting}
                 size="lg"
-                className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground"
+                className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground disabled:opacity-50"
               >
                 <Phone className="h-7 w-7" />
               </Button>
@@ -214,11 +244,15 @@ const CheckIn = () => {
             <div className="w-24 h-24 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-3xl font-bold mb-4">
               C
             </div>
-            <AudioVisualizer />
+            {connecting ? (
+              <p className="text-senior-base opacity-80 animate-pulse">Conectando...</p>
+            ) : (
+              <AudioVisualizer />
+            )}
             <h2 className="text-senior-xl font-bold mt-4">Clara</h2>
             <p className="text-senior-2xl font-mono mt-2">{formatTime(elapsed)}</p>
             <p className="text-senior-sm opacity-70 mt-2 max-w-sm text-center">
-              Voice check-in in progress. Speak naturally with Clara about your medications.
+              {connecting ? 'Establishing voice connection...' : 'Voice check-in in progress. Speak naturally with Clara about your medications.'}
             </p>
 
             <Button
