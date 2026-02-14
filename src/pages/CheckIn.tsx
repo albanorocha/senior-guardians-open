@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { AtomsWidget } from 'atoms-widget-core';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -171,9 +172,13 @@ const CheckIn = () => {
               Voice check-in in progress. Speak naturally with Clara about your medications.
             </p>
 
-            {/* Atoms widget placeholder area */}
-            <div className="mt-6 w-full max-w-sm rounded-lg bg-primary-foreground/10 p-4 text-center">
-              <p className="text-sm opacity-60">Voice widget active</p>
+            {/* Atoms Voice Widget */}
+            <div className="mt-6 w-full max-w-sm">
+              <AtomsWidget
+                assistantId="6990ef650d1c87f0c9a42402"
+                mode="voice"
+                accentColor="#4A90A4"
+              />
             </div>
 
             <Button
