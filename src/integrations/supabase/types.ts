@@ -147,6 +147,27 @@ export type Database = {
           },
         ]
       }
+      pre_call_context: {
+        Row: {
+          created_at: string
+          id: string
+          user_id: string
+          variables: Json
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          user_id: string
+          variables?: Json
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          user_id?: string
+          variables?: Json
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           age: number | null
