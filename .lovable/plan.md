@@ -1,65 +1,69 @@
 
 
-# Corrigir Integração de Voz: Auto-iniciar agente ao atender
+# Corrigir Encerramento de Sessao e Latencia de Conexao
 
-## Problema Atual
+## Problemas
 
-O `AtomsWidget` renderiza seu proprio botao ("Talk to Atoms"), exigindo um segundo clique apos o botao verde de "Atender". O usuario quer que ao clicar no botao verde, o agente Clara ja comece a falar imediatamente.
+1. **Sessao nao encerra ao desligar**: `stopSession()` nao esta sendo aguardado com `await`, e nao ha cleanup quando o componente desmonta
+2. **Latencia alta na conexao**: Sem feedback visual durante a conexao, e possibilidade de sessoes duplicadas
 
 ## Solucao
 
-Substituir o `AtomsWidget` (que tem UI propria) pelo `atoms-client-sdk` (SDK programatico), que permite iniciar a sessao de voz automaticamente via codigo.
+Modificar apenas `src/pages/CheckIn.tsx` com as seguintes mudancas:
 
-## Fluxo
+### 1. Novo estado `connecting`
+- Adicionar `const [connecting, setConnecting] = useState(false)`
+- Desabilitar o botao verde "Atender" enquanto `connecting === true`
+- Mostrar texto "Conectando..." na tela ativa ate a sessao iniciar
+
+### 2. Cleanup no unmount
+- Adicionar `useEffect` que ao desmontar o componente:
+  - Limpa o timer
+  - Chama `await atomsClientRef.current.stopSession()` se houver sessao ativa
+  - Seta a ref como `null`
+
+### 3. Encerrar sessao anterior no handleAnswer
+- Antes de criar nova sessao, verificar se `atomsClientRef.current` existe e encerra-la
+- Setar `connecting = true` no inicio
+- No evento `session_started`, setar `connecting = false`
+
+### 4. handleEndCall assincrono
+- Tornar `handleEndCall` async
+- Usar `await atomsClientRef.current.stopSession()` em vez de chamada sincrona
+- Setar ref como `null` apos encerrar
+
+### 5. Evento session_ended
+- No listener `session_ended`, automaticamente transicionar para o estado `summary` (caso o agente encerre a sessao pelo lado dele)
+- Limpar timer e ref
+
+## Detalhes Tecnicos
+
+Arquivo modificado: `src/pages/CheckIn.tsx`
+
+Mudancas no codigo:
 
 ```text
-Usuario clica "Atender" (botao verde)
-        |
-        v
-Frontend chama edge function /atoms-session
-        |
-        v
-Edge function chama API Smallest.ai com API Key
-  POST atoms-api.smallest.ai/api/v1/conversation/webcall
-        |
-        v
-Retorna accessToken + host (WebRTC)
-        |
-        v
-Frontend usa AtomsClient.startSession() para conectar
-        |
-        v
-Agente Clara comeca a falar automaticamente
+Linha 37: + const [connecting, setConnecting] = useState(false);
+
+Novo useEffect (apos refs):
+  useEffect cleanup -> stopSession on unmount
+
+handleAnswer:
+  + stop previous session if exists
+  + setConnecting(true)
+  + on session_started -> setConnecting(false)
+  + on session_ended -> auto handleEndCall
+
+handleEndCall:
+  - sync -> async
+  + await stopSession()
+
+Botao Atender:
+  + disabled={connecting}
+
+Tela active:
+  + if connecting, mostrar "Conectando..." em vez do AudioVisualizer
 ```
 
-## Etapas de Implementacao
-
-### 1. Armazenar a API Key como secret
-- Adicionar `SMALLEST_AI_API_KEY` como secret do projeto (valor: `sk_806034754ec921fe32d9f5cfee0dd731`)
-- Nunca expor no frontend
-
-### 2. Criar edge function `atoms-session`
-- Recebe requisicao do frontend
-- Chama `POST https://atoms-api.smallest.ai/api/v1/conversation/webcall` com o `agentId` e a API Key
-- Retorna o `accessToken` e `host` para o frontend
-
-### 3. Instalar `atoms-client-sdk` no frontend
-- Adicionar como dependencia npm
-- Remover uso do `AtomsWidget` de `atoms-widget-core`
-
-### 4. Atualizar `src/pages/CheckIn.tsx`
-- Restaurar o botao verde de "Atender" na tela incoming (ja existe)
-- No `handleAnswer()`:
-  - Chamar a edge function `/atoms-session` para obter token
-  - Criar instancia de `AtomsClient`
-  - Chamar `client.startSession({ accessToken, mode: "webcall", host })`
-  - O agente comeca a falar imediatamente
-- No `handleEndCall()`:
-  - Chamar `client.stopSession()` para encerrar a conexao WebRTC
-- Manter o timer, visualizador de audio e botao vermelho de encerrar
-
-### Arquivos modificados/criados
-- `supabase/functions/atoms-session/index.ts` — nova edge function
-- `src/pages/CheckIn.tsx` — substituir AtomsWidget por AtomsClient programatico
-- `package.json` — adicionar `atoms-client-sdk`
+Nenhum arquivo novo sera criado. Apenas `src/pages/CheckIn.tsx` sera modificado.
 
