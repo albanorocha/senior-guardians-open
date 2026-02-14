@@ -1,69 +1,130 @@
 
 
-# Corrigir Encerramento de Sessao e Latencia de Conexao
+# Enviar Contexto do Paciente para o Agente Clara via API
 
-## Problemas
+## Objetivo
 
-1. **Sessao nao encerra ao desligar**: `stopSession()` nao esta sendo aguardado com `await`, e nao ha cleanup quando o componente desmonta
-2. **Latencia alta na conexao**: Sem feedback visual durante a conexao, e possibilidade de sessoes duplicadas
+Antes de iniciar a chamada de voz, o sistema deve coletar todas as informacoes do paciente (nome, medicacoes, frequencias, etc.) e envia-las como variaveis para a API do Smallest.ai. Assim, a Clara ja comeca a conversa sabendo quem e o paciente e quais medicamentos verificar.
 
-## Solucao
+## Como Funciona a Integracao
 
-Modificar apenas `src/pages/CheckIn.tsx` com as seguintes mudancas:
+A API do Smallest.ai aceita um campo `variables` no corpo da requisicao de webcall. Essas variaveis sao injetadas no prompt do agente e ficam disponiveis durante toda a conversa.
 
-### 1. Novo estado `connecting`
-- Adicionar `const [connecting, setConnecting] = useState(false)`
-- Desabilitar o botao verde "Atender" enquanto `connecting === true`
-- Mostrar texto "Conectando..." na tela ativa ate a sessao iniciar
+```text
+Frontend coleta dados do paciente (nome, medicacoes, etc.)
+        |
+        v
+Envia para edge function /atoms-session com os dados
+        |
+        v
+Edge function repassa para Smallest.ai API com campo "variables"
+  POST atoms-api.smallest.ai/api/v1/conversation/webcall
+  Body: { agentId, variables: { patient_name, medications, ... } }
+        |
+        v
+Agente Clara recebe o contexto e inicia a conversa personalizada
+```
 
-### 2. Cleanup no unmount
-- Adicionar `useEffect` que ao desmontar o componente:
-  - Limpa o timer
-  - Chama `await atomsClientRef.current.stopSession()` se houver sessao ativa
-  - Seta a ref como `null`
+## Etapas de Implementacao
 
-### 3. Encerrar sessao anterior no handleAnswer
-- Antes de criar nova sessao, verificar se `atomsClientRef.current` existe e encerra-la
-- Setar `connecting = true` no inicio
-- No evento `session_started`, setar `connecting = false`
+### 1. Atualizar a Edge Function `atoms-session`
 
-### 4. handleEndCall assincrono
-- Tornar `handleEndCall` async
-- Usar `await atomsClientRef.current.stopSession()` em vez de chamada sincrona
-- Setar ref como `null` apos encerrar
+Arquivo: `supabase/functions/atoms-session/index.ts`
 
-### 5. Evento session_ended
-- No listener `session_ended`, automaticamente transicionar para o estado `summary` (caso o agente encerre a sessao pelo lado dele)
-- Limpar timer e ref
+- Aceitar um campo `variables` no corpo da requisicao (alem do `agentId`)
+- Repassar esse campo para a API do Smallest.ai no POST para `/conversation/webcall`
+
+Corpo enviado para Smallest.ai:
+```text
+{
+  "agentId": "6990ef650d1c87f0c9a42402",
+  "variables": {
+    "patient_name": "Albano",
+    "patient_age": 35,
+    "medications": "test (5mg, once daily, Take with water)",
+    "current_date": "2026-02-14",
+    "current_time": "19:20"
+  }
+}
+```
+
+### 2. Atualizar `src/pages/CheckIn.tsx`
+
+No `handleAnswer()`:
+- Buscar dados do perfil do usuario (nome, idade) - ja temos via `useAuth`
+- Usar a lista de medicacoes ja carregada no estado `medications`
+- Formatar as medicacoes como string legivel (nome, dosagem, frequencia, instrucoes)
+- Enviar tudo no body da chamada para a edge function
+
+Exemplo do body enviado pelo frontend:
+```text
+{
+  "agentId": "6990ef650d1c87f0c9a42402",
+  "variables": {
+    "patient_name": "Albano",
+    "patient_age": 35,
+    "medications": "1. test - 5mg, once daily. Instructions: Take with water",
+    "current_date": "Friday, February 14, 2026",
+    "current_time": "7:20 PM"
+  }
+}
+```
+
+### 3. Configurar o Agente no Painel do Smallest.ai
+
+No painel do Smallest.ai (https://app.smallest.ai), voce precisa configurar o prompt do agente Clara para usar as variaveis. No prompt, use a sintaxe de variaveis do Atoms:
+
+```text
+You are Clara, a friendly health companion for elderly patients.
+
+The patient you are speaking with is {{patient_name}}, age {{patient_age}}.
+
+Today is {{current_date}} and the current time is {{current_time}}.
+
+Their current medications are:
+{{medications}}
+
+Your task is to:
+1. Greet the patient warmly by name
+2. Ask about each medication - did they take it today?
+3. Ask if they experienced any side effects or issues
+4. Ask how they are feeling overall (mood)
+5. Provide a brief encouraging message
+6. End the call politely
+
+Keep responses short and clear. Speak slowly. Use simple language.
+```
+
+**Onde configurar no Smallest.ai:**
+1. Acesse https://app.smallest.ai
+2. Va em "Agents" e selecione o agente Clara (ID: `6990ef650d1c87f0c9a42402`)
+3. Na aba "Prompt" ou "Single Prompt", cole o prompt acima usando as variaveis com `{{variable_name}}`
+4. Na aba "Default Variables" (opcional), defina valores padrao caso alguma variavel nao seja enviada
+5. Salve as alteracoes
 
 ## Detalhes Tecnicos
 
-Arquivo modificado: `src/pages/CheckIn.tsx`
+### Arquivos modificados
+- `supabase/functions/atoms-session/index.ts` - aceitar e repassar `variables`
+- `src/pages/CheckIn.tsx` - coletar e enviar contexto do paciente
 
-Mudancas no codigo:
+### Dados enviados ao agente
 
+| Variavel | Origem | Exemplo |
+|---|---|---|
+| `patient_name` | profiles.full_name | "Albano" |
+| `patient_age` | profiles.age | 35 |
+| `medications` | medications table (formatado) | "1. test - 5mg, once daily..." |
+| `current_date` | `new Date()` formatado | "Friday, February 14, 2026" |
+| `current_time` | `new Date()` formatado | "7:20 PM" |
+
+### Formato das medicacoes
+
+Cada medicacao sera formatada como:
 ```text
-Linha 37: + const [connecting, setConnecting] = useState(false);
-
-Novo useEffect (apos refs):
-  useEffect cleanup -> stopSession on unmount
-
-handleAnswer:
-  + stop previous session if exists
-  + setConnecting(true)
-  + on session_started -> setConnecting(false)
-  + on session_ended -> auto handleEndCall
-
-handleEndCall:
-  - sync -> async
-  + await stopSession()
-
-Botao Atender:
-  + disabled={connecting}
-
-Tela active:
-  + if connecting, mostrar "Conectando..." em vez do AudioVisualizer
+1. [nome] - [dosagem], [frequencia]. Instructions: [instrucoes]
+2. [nome] - [dosagem], [frequencia]. Instructions: [instrucoes]
 ```
 
-Nenhum arquivo novo sera criado. Apenas `src/pages/CheckIn.tsx` sera modificado.
+Se nao houver medicacoes, sera enviado: "No medications registered."
 
