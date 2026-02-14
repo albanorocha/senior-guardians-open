@@ -1,29 +1,65 @@
 
 
-# Integração do Smallest.ai Atoms Voice Widget
+# Corrigir Integração de Voz: Auto-iniciar agente ao atender
 
-## O que será feito
+## Problema Atual
 
-Substituir o placeholder atual na página de check-in pelo widget real de voz do Smallest.ai, permitindo conversas de voz com a Clara.
+O `AtomsWidget` renderiza seu proprio botao ("Talk to Atoms"), exigindo um segundo clique apos o botao verde de "Atender". O usuario quer que ao clicar no botao verde, o agente Clara ja comece a falar imediatamente.
 
-## Detalhes
+## Solucao
 
-### 1. Instalar o pacote `atoms-widget-core`
-- Adicionar como dependência npm do projeto
+Substituir o `AtomsWidget` (que tem UI propria) pelo `atoms-client-sdk` (SDK programatico), que permite iniciar a sessao de voz automaticamente via codigo.
 
-### 2. Atualizar a página de Check-in (`/check-in`)
-- Importar o componente `AtomsWidget` de `atoms-widget-core`
-- Substituir o bloco placeholder (linhas 174-177) pelo widget real:
-  - `assistantId="6990ef650d1c87f0c9a42402"`
-  - `mode="voice"`
-  - `accentColor="#4A90A4"`
-- Adicionar tratamento de erro caso o widget não carregue
+## Fluxo
 
-### Sobre a API Key
-- A API Key (`sk_...`) é usada apenas no painel do Smallest.ai para autenticar sua conta
-- O widget no frontend usa apenas o Assistant ID, que é público
-- Não é necessário armazenar a API Key no projeto
+```text
+Usuario clica "Atender" (botao verde)
+        |
+        v
+Frontend chama edge function /atoms-session
+        |
+        v
+Edge function chama API Smallest.ai com API Key
+  POST atoms-api.smallest.ai/api/v1/conversation/webcall
+        |
+        v
+Retorna accessToken + host (WebRTC)
+        |
+        v
+Frontend usa AtomsClient.startSession() para conectar
+        |
+        v
+Agente Clara comeca a falar automaticamente
+```
 
-### Arquivo modificado
-- `src/pages/CheckIn.tsx` — importar AtomsWidget e substituir placeholder
+## Etapas de Implementacao
+
+### 1. Armazenar a API Key como secret
+- Adicionar `SMALLEST_AI_API_KEY` como secret do projeto (valor: `sk_806034754ec921fe32d9f5cfee0dd731`)
+- Nunca expor no frontend
+
+### 2. Criar edge function `atoms-session`
+- Recebe requisicao do frontend
+- Chama `POST https://atoms-api.smallest.ai/api/v1/conversation/webcall` com o `agentId` e a API Key
+- Retorna o `accessToken` e `host` para o frontend
+
+### 3. Instalar `atoms-client-sdk` no frontend
+- Adicionar como dependencia npm
+- Remover uso do `AtomsWidget` de `atoms-widget-core`
+
+### 4. Atualizar `src/pages/CheckIn.tsx`
+- Restaurar o botao verde de "Atender" na tela incoming (ja existe)
+- No `handleAnswer()`:
+  - Chamar a edge function `/atoms-session` para obter token
+  - Criar instancia de `AtomsClient`
+  - Chamar `client.startSession({ accessToken, mode: "webcall", host })`
+  - O agente comeca a falar imediatamente
+- No `handleEndCall()`:
+  - Chamar `client.stopSession()` para encerrar a conexao WebRTC
+- Manter o timer, visualizador de audio e botao vermelho de encerrar
+
+### Arquivos modificados/criados
+- `supabase/functions/atoms-session/index.ts` — nova edge function
+- `src/pages/CheckIn.tsx` — substituir AtomsWidget por AtomsClient programatico
+- `package.json` — adicionar `atoms-client-sdk`
 
