@@ -1,130 +1,89 @@
 
 
-# Enviar Contexto do Paciente para o Agente Clara via API
+# Pre Call API - Enviar Contexto do Paciente para Clara
 
-## Objetivo
+## Arquitetura em Duas Partes
 
-Antes de iniciar a chamada de voz, o sistema deve coletar todas as informacoes do paciente (nome, medicacoes, frequencias, etc.) e envia-las como variaveis para a API do Smallest.ai. Assim, a Clara ja comeca a conversa sabendo quem e o paciente e quais medicamentos verificar.
-
-## Como Funciona a Integracao
-
-A API do Smallest.ai aceita um campo `variables` no corpo da requisicao de webcall. Essas variaveis sao injetadas no prompt do agente e ficam disponiveis durante toda a conversa.
+O fluxo e dividido entre o que o Lovable controla (codigo) e o que voce configura manualmente no dashboard do Atoms.
 
 ```text
-Frontend coleta dados do paciente (nome, medicacoes, etc.)
-        |
-        v
-Envia para edge function /atoms-session com os dados
-        |
-        v
-Edge function repassa para Smallest.ai API com campo "variables"
-  POST atoms-api.smallest.ai/api/v1/conversation/webcall
-  Body: { agentId, variables: { patient_name, medications, ... } }
-        |
-        v
-Agente Clara recebe o contexto e inicia a conversa personalizada
+PARTE 1 - Lovable (codigo)                    PARTE 2 - Atoms Dashboard (manual)
+================================               ==================================
+                                               
+Frontend inicia webcall                        No dashboard do Atoms:
+  envia user_id para atoms-session             1. Adicionar Pre Call API Node
+        |                                      2. URL: {supabase_url}/functions/v1/atoms-precall
+        v                                      3. Metodo: POST
+atoms-session salva contexto                   4. Configurar headers (apikey)
+  na tabela pre_call_context                   
+  e cria a webcall                             
+        |                                      Atoms chama o webhook automaticamente
+        v                                      antes de iniciar a conversa
+atoms-precall (webhook)                              |
+  recebe chamada do Atoms                            v
+  busca contexto do paciente                   Clara recebe as variaveis
+  retorna variables                            e inicia conversa personalizada
 ```
 
-## Etapas de Implementacao
+## Parte 1 - Codigo (Lovable)
 
-### 1. Atualizar a Edge Function `atoms-session`
+### 1. Criar tabela `pre_call_context`
 
-Arquivo: `supabase/functions/atoms-session/index.ts`
+Tabela temporaria para armazenar o contexto do paciente entre a criacao da sessao e a chamada do Pre Call API.
 
-- Aceitar um campo `variables` no corpo da requisicao (alem do `agentId`)
-- Repassar esse campo para a API do Smallest.ai no POST para `/conversation/webcall`
-
-Corpo enviado para Smallest.ai:
-```text
-{
-  "agentId": "6990ef650d1c87f0c9a42402",
-  "variables": {
-    "patient_name": "Albano",
-    "patient_age": 35,
-    "medications": "test (5mg, once daily, Take with water)",
-    "current_date": "2026-02-14",
-    "current_time": "19:20"
-  }
-}
-```
-
-### 2. Atualizar `src/pages/CheckIn.tsx`
-
-No `handleAnswer()`:
-- Buscar dados do perfil do usuario (nome, idade) - ja temos via `useAuth`
-- Usar a lista de medicacoes ja carregada no estado `medications`
-- Formatar as medicacoes como string legivel (nome, dosagem, frequencia, instrucoes)
-- Enviar tudo no body da chamada para a edge function
-
-Exemplo do body enviado pelo frontend:
-```text
-{
-  "agentId": "6990ef650d1c87f0c9a42402",
-  "variables": {
-    "patient_name": "Albano",
-    "patient_age": 35,
-    "medications": "1. test - 5mg, once daily. Instructions: Take with water",
-    "current_date": "Friday, February 14, 2026",
-    "current_time": "7:20 PM"
-  }
-}
-```
-
-### 3. Configurar o Agente no Painel do Smallest.ai
-
-No painel do Smallest.ai (https://app.smallest.ai), voce precisa configurar o prompt do agente Clara para usar as variaveis. No prompt, use a sintaxe de variaveis do Atoms:
-
-```text
-You are Clara, a friendly health companion for elderly patients.
-
-The patient you are speaking with is {{patient_name}}, age {{patient_age}}.
-
-Today is {{current_date}} and the current time is {{current_time}}.
-
-Their current medications are:
-{{medications}}
-
-Your task is to:
-1. Greet the patient warmly by name
-2. Ask about each medication - did they take it today?
-3. Ask if they experienced any side effects or issues
-4. Ask how they are feeling overall (mood)
-5. Provide a brief encouraging message
-6. End the call politely
-
-Keep responses short and clear. Speak slowly. Use simple language.
-```
-
-**Onde configurar no Smallest.ai:**
-1. Acesse https://app.smallest.ai
-2. Va em "Agents" e selecione o agente Clara (ID: `6990ef650d1c87f0c9a42402`)
-3. Na aba "Prompt" ou "Single Prompt", cole o prompt acima usando as variaveis com `{{variable_name}}`
-4. Na aba "Default Variables" (opcional), defina valores padrao caso alguma variavel nao seja enviada
-5. Salve as alteracoes
-
-## Detalhes Tecnicos
-
-### Arquivos modificados
-- `supabase/functions/atoms-session/index.ts` - aceitar e repassar `variables`
-- `src/pages/CheckIn.tsx` - coletar e enviar contexto do paciente
-
-### Dados enviados ao agente
-
-| Variavel | Origem | Exemplo |
+| Coluna | Tipo | Descricao |
 |---|---|---|
-| `patient_name` | profiles.full_name | "Albano" |
-| `patient_age` | profiles.age | 35 |
-| `medications` | medications table (formatado) | "1. test - 5mg, once daily..." |
-| `current_date` | `new Date()` formatado | "Friday, February 14, 2026" |
-| `current_time` | `new Date()` formatado | "7:20 PM" |
+| id | uuid (PK) | Identificador unico |
+| user_id | uuid | ID do usuario |
+| variables | jsonb | Dados do paciente (nome, medicacoes, etc.) |
+| created_at | timestamp | Para limpeza de registros antigos |
 
-### Formato das medicacoes
+RLS: service_role apenas (acessada somente pelas edge functions).
 
-Cada medicacao sera formatada como:
-```text
-1. [nome] - [dosagem], [frequencia]. Instructions: [instrucoes]
-2. [nome] - [dosagem], [frequencia]. Instructions: [instrucoes]
-```
+### 2. Atualizar `atoms-session` edge function
 
-Se nao houver medicacoes, sera enviado: "No medications registered."
+Antes de criar a webcall:
+- Receber `user_id` e `variables` do frontend
+- Salvar o contexto na tabela `pre_call_context` (upsert por user_id)
+- Criar a webcall normalmente (sem enviar variables, pois o endpoint webcall ignora)
+
+### 3. Criar nova edge function `atoms-precall`
+
+Este e o webhook que o Atoms vai chamar. Ele:
+- Recebe a requisicao do Atoms (o body depende do que o Atoms envia)
+- Busca o contexto mais recente do paciente na tabela `pre_call_context`
+- Retorna as variaveis no formato esperado pelo Atoms
+
+### 4. Atualizar `CheckIn.tsx`
+
+- Enviar `user_id` junto com as `variables` para a edge function `atoms-session`
+- O restante do codigo de coleta de dados (nome, medicacoes, etc.) ja esta pronto
+
+## Parte 2 - Dashboard do Atoms (manual, feito por voce)
+
+No painel do Smallest.ai (https://app.smallest.ai):
+
+1. Abrir o agente Clara (ID: `6990ef650d1c87f0c9a42402`)
+2. Adicionar um **Pre Call API Node** no fluxo do agente
+3. Configurar a URL do webhook apontando para a edge function:
+   - URL: `https://rlbratdaqtdpbifkceds.supabase.co/functions/v1/atoms-precall`
+   - Metodo: POST
+   - Headers: adicionar `apikey` com a chave anonima do projeto
+4. Garantir que o prompt do agente usa as variaveis com sintaxe `{{patient_name}}`, `{{medications}}`, etc.
+
+## Ponto importante
+
+Precisamos saber **que dados o Atoms envia no body** quando chama o Pre Call API. Isso determina como vamos identificar o paciente correto. Opcoes possiveis:
+
+- Se o Atoms envia algum ID de sessao que podemos controlar, usamos esse ID como chave
+- Se nao envia nada identificavel, usamos o registro mais recente do `pre_call_context` para o usuario (funciona bem para MVP com poucos usuarios simultaneos)
+
+Apos a implementacao, voce podera verificar nos logs da edge function `atoms-precall` exatamente o que o Atoms envia, e ajustaremos se necessario.
+
+## Arquivos criados/modificados
+
+- **Novo:** Migracao SQL para tabela `pre_call_context`
+- **Novo:** `supabase/functions/atoms-precall/index.ts`
+- **Modificado:** `supabase/functions/atoms-session/index.ts` - salvar contexto na tabela
+- **Modificado:** `src/pages/CheckIn.tsx` - enviar user_id
 
