@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      alerts: {
+        Row: {
+          acknowledged: boolean
+          check_in_id: string | null
+          created_at: string
+          id: string
+          reason: string
+          severity: string
+          tag: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          acknowledged?: boolean
+          check_in_id?: string | null
+          created_at?: string
+          id?: string
+          reason: string
+          severity?: string
+          tag?: string | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          acknowledged?: boolean
+          check_in_id?: string | null
+          created_at?: string
+          id?: string
+          reason?: string
+          severity?: string
+          tag?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_check_in_id_fkey"
+            columns: ["check_in_id"]
+            isOneToOne: false
+            referencedRelation: "check_ins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       check_in_responses: {
         Row: {
           check_in_id: string
@@ -99,6 +143,44 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      health_logs: {
+        Row: {
+          category: string
+          check_in_id: string | null
+          created_at: string
+          details: string
+          id: string
+          tag: string | null
+          user_id: string
+        }
+        Insert: {
+          category: string
+          check_in_id?: string | null
+          created_at?: string
+          details: string
+          id?: string
+          tag?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string
+          check_in_id?: string | null
+          created_at?: string
+          details?: string
+          id?: string
+          tag?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "health_logs_check_in_id_fkey"
+            columns: ["check_in_id"]
+            isOneToOne: false
+            referencedRelation: "check_ins"
             referencedColumns: ["id"]
           },
         ]
@@ -194,6 +276,44 @@ export type Database = {
           role?: string | null
         }
         Relationships: []
+      }
+      scheduled_reminders: {
+        Row: {
+          check_in_id: string | null
+          created_at: string
+          id: string
+          reason: string
+          scheduled_time: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          check_in_id?: string | null
+          created_at?: string
+          id?: string
+          reason: string
+          scheduled_time: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          check_in_id?: string | null
+          created_at?: string
+          id?: string
+          reason?: string
+          scheduled_time?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_reminders_check_in_id_fkey"
+            columns: ["check_in_id"]
+            isOneToOne: false
+            referencedRelation: "check_ins"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

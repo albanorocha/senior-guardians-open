@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { Badge } from '@/components/ui/badge';
 import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -54,6 +55,12 @@ const CheckIn = () => {
   const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const conversationHistoryRef = useRef<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [textInput, setTextInput] = useState('');
+
+  // New: accumulate tool data during the call
+  const [callAlerts, setCallAlerts] = useState<{ type: string; severity: string; reason: string; tag?: string }[]>([]);
+  const [callHealthLogs, setCallHealthLogs] = useState<{ category: string; details: string; tag?: string }[]>([]);
+  const [callReminders, setCallReminders] = useState<{ reason: string; scheduled_time: string }[]>([]);
+
   const [patientContext, setPatientContext] = useState<{
     patientName: string;
     patientAge: number | string | null;
@@ -552,29 +559,33 @@ const CheckIn = () => {
           shouldEndCallRef.current = true;
         }
         if (item.tool === 'send_alert') {
+          const alert = { type: 'emergency', severity: item.args.severity || 'critical', reason: item.args.reason || 'Emergency alert', tag: item.args.tag };
+          setCallAlerts(prev => [...prev, alert]);
           toast({
             title: '🚨 EMERGENCY ALERT SENT',
             description: item.args.reason || 'Emergency services being contacted',
             variant: 'destructive',
           });
-          console.log('[CheckIn] Emergency alert:', item.args);
         }
         if (item.tool === 'send_alert_to_caregiver') {
+          const alert = { type: 'caregiver', severity: item.args.severity || 'warning', reason: item.args.reason || 'Caregiver notified', tag: item.args.tag };
+          setCallAlerts(prev => [...prev, alert]);
           toast({
             title: '📋 Caregiver Notified',
             description: item.args.reason || 'Caregiver has been alerted',
           });
-          console.log('[CheckIn] Caregiver alert:', item.args);
         }
         if (item.tool === 'log_health_data') {
-          console.log('[CheckIn] Health data logged:', item.args);
+          const log = { category: item.args.category || 'other', details: item.args.details || item.args.description || JSON.stringify(item.args), tag: item.args.tag };
+          setCallHealthLogs(prev => [...prev, log]);
         }
         if (item.tool === 'schedule_reminder') {
+          const reminder = { reason: item.args.reason || 'Follow-up', scheduled_time: item.args.time || 'later' };
+          setCallReminders(prev => [...prev, reminder]);
           toast({
             title: `⏰ Reminder scheduled`,
             description: `Clara will call back ${item.args.time || 'later'}`,
           });
-          console.log('[CheckIn] Reminder scheduled:', item.args);
         }
       }
     }
@@ -654,6 +665,27 @@ const CheckIn = () => {
 
     if (responseRows.length > 0) {
       await supabase.from('check_in_responses').insert(responseRows);
+    }
+
+    // Persist alerts
+    if (callAlerts.length > 0) {
+      await supabase.from('alerts').insert(
+        callAlerts.map(a => ({ user_id: user.id, check_in_id: checkIn.id, type: a.type, severity: a.severity, reason: a.reason, tag: a.tag || null }))
+      );
+    }
+
+    // Persist health logs
+    if (callHealthLogs.length > 0) {
+      await supabase.from('health_logs').insert(
+        callHealthLogs.map(h => ({ user_id: user.id, check_in_id: checkIn.id, category: h.category, details: h.details, tag: h.tag || null }))
+      );
+    }
+
+    // Persist scheduled reminders
+    if (callReminders.length > 0) {
+      await supabase.from('scheduled_reminders').insert(
+        callReminders.map(r => ({ user_id: user.id, check_in_id: checkIn.id, reason: r.reason, scheduled_time: r.scheduled_time }))
+      );
     }
 
     toast({ title: 'Check-in saved!' });
@@ -901,6 +933,54 @@ const CheckIn = () => {
                   ))}
                 </CardContent>
               </Card>
+
+              {/* Alerts fired during call */}
+              {callAlerts.length > 0 && (
+                <Card className="shadow-soft border-destructive/30">
+                  <CardContent className="space-y-3 pt-6">
+                    <Label className="text-senior-sm font-semibold flex items-center gap-2">🚨 Alerts</Label>
+                    {callAlerts.map((a, i) => (
+                      <div key={i} className={`flex items-start gap-2 p-2 rounded-lg ${a.type === 'emergency' ? 'bg-destructive/10' : 'bg-yellow-500/10'}`}>
+                        <span className="text-sm">{a.type === 'emergency' ? '🔴' : '🟡'}</span>
+                        <div>
+                          <p className="text-sm font-medium">{a.reason}</p>
+                          {a.tag && <p className="text-xs text-muted-foreground">{a.tag}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Health data logged */}
+              {callHealthLogs.length > 0 && (
+                <Card className="shadow-soft">
+                  <CardContent className="space-y-3 pt-6">
+                    <Label className="text-senior-sm font-semibold flex items-center gap-2">📊 Health Data</Label>
+                    {callHealthLogs.map((h, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-muted/50">
+                        <Badge variant="secondary" className="text-xs shrink-0">{h.category}</Badge>
+                        <p className="text-sm">{h.details}</p>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Reminders scheduled */}
+              {callReminders.length > 0 && (
+                <Card className="shadow-soft">
+                  <CardContent className="space-y-3 pt-6">
+                    <Label className="text-senior-sm font-semibold flex items-center gap-2">⏰ Reminders</Label>
+                    {callReminders.map((r, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                        <p className="text-sm flex-1">{r.reason}</p>
+                        <Badge variant="outline" className="text-xs">{r.scheduled_time}</Badge>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
 
               <Card className="shadow-soft">
                 <CardContent className="pt-6">
