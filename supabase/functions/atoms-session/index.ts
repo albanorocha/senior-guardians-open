@@ -35,7 +35,7 @@ serve(async (req) => {
     }
 
     // Pass variables directly in the webcall request
-    const webcallBody = JSON.stringify({ agentId, variables: variables || {} });
+    const webcallBody = JSON.stringify({ agentId });
     console.log('[atoms-session] Creating webcall - URL: https://atoms-api.smallest.ai/api/v1/conversation/webcall');
     console.log('[atoms-session] Creating webcall - body:', webcallBody);
     
