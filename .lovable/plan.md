@@ -1,45 +1,76 @@
 
-# Correções: Finalizar chamada antes de nova + Cor do microfone
 
-## 1. Finalizar chamada anterior antes de iniciar nova
+# Corrigir envio de audio e transcrição vazia no Check-In
 
-**Problema**: Ao atender uma nova chamada, o codigo nao limpa os recursos da chamada anterior (streams de audio, MediaRecorder, AudioContext). Isso causa dois audios tocando simultaneamente.
+## Problema Identificado
 
-**Solucao**: Chamar `resetCallState()` no inicio de `handleAnswer()` para garantir que todos os recursos da chamada anterior sejam liberados antes de iniciar uma nova.
+Os logs da edge function mostram que o audio chega ao servidor (39-68KB), mas o Pulse STT retorna transcrição vazia repetidamente. Existem dois problemas:
 
-## 2. Cor do microfone
+1. **Content-Type incorreto no STT**: O audio e gravado como `audio/webm;codecs=opus` pelo MediaRecorder, mas o edge function envia ao Pulse com `Content-Type: audio/webm`. O Pulse pode nao estar decodificando corretamente o container webm. A solução e enviar o Content-Type correto (`audio/webm;codecs=opus`) ou, melhor ainda, enviar o blob diretamente como `application/octet-stream` com o formato especificado como query parameter.
 
-**Problema**: O microfone no estado "listening" ja foi alterado para `bg-secondary/80` (amber), mas o usuario quer confirmar que nao esta vermelho.
+2. **Stale closure no `conversationHistory`**: Em `sendAudioToVoiceChat` (linha 465), `conversationHistory` captura o valor do estado no momento da criação do callback, não o valor atual. Isso pode causar contexto de conversa desatualizado.
 
-**Verificacao**: Confirmar que o estado `listening` usa `bg-secondary/80` (amber/laranja) e nao vermelho. O vermelho (`bg-destructive/80`) deve ser usado apenas quando o usuario esta falando (`speaking`).
+## Solução
+
+### 1. Melhorar compatibilidade do audio com Pulse STT
+
+No edge function `voice-chat/index.ts`:
+- Mudar o Content-Type para `application/octet-stream` que e mais universalmente aceito
+- Adicionar query parameter `content_type=audio/webm` para informar o Pulse do formato real
+- Alternativa: testar com `audio/webm;codecs=opus` como Content-Type
+
+### 2. Corrigir stale closure
+
+Em `sendAudioToVoiceChat` no `CheckIn.tsx`:
+- Usar um ref para `conversationHistory` para sempre ter o valor mais recente
+- Ou usar a forma funcional do setState para ler o valor atual
+
+### 3. Aumentar robustez do VAD
+
+- Reduzir `SILENCE_THRESHOLD` de 30 para 20 para capturar vozes mais baixas
+- Aumentar `MIN_RECORDING_DURATION_MS` de 800 para 1000 para garantir capturas mais substanciais
 
 ---
 
 ## Detalhes Tecnicos
 
-### Arquivo: `src/pages/CheckIn.tsx`
+### Arquivo: `supabase/functions/voice-chat/index.ts`
 
-**Mudanca 1 — `handleAnswer` (linha ~326)**:
-Adicionar `resetCallState()` como primeira acao dentro de `handleAnswer`, antes de qualquer setup novo. Isso garante que:
-- MediaRecorder anterior e parado
-- Streams de audio anteriores sao fechados
-- AudioContext anterior e encerrado
-- Todos os refs sao resetados
+Alterar o envio ao Pulse STT para usar Content-Type mais preciso:
 
 ```typescript
-const handleAnswer = async () => {
-  // Limpar qualquer chamada anterior antes de iniciar nova
-  resetCallState();
-  setConnecting(true);
-  // ... resto do codigo
-};
+const sttRes = await fetch('https://waves-api.smallest.ai/api/v1/pulse/get_text?model=pulse&language=en', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${SMALLEST_AI_API_KEY}`,
+    'Content-Type': 'audio/webm;codecs=opus',
+  },
+  body: audioBytes.buffer,
+});
 ```
 
-**Mudanca 2 — Cor do microfone**:
-Verificar e garantir que as cores estejam corretas:
-- `listening` → `bg-secondary/80` (amber/laranja) — ja implementado
-- `speaking` → `bg-secondary` (amber, mesma familia, nao vermelho)
-- `processing` → indicador de loading
-- `clara-speaking` → `bg-accent/60` (teal, indicando que a Clara esta falando)
+### Arquivo: `src/pages/CheckIn.tsx`
 
-Isso remove o vermelho do microfone completamente, usando amber para estados do usuario e teal para estados da Clara.
+**Correcao 1 — Ref para conversationHistory**:
+Adicionar um `conversationHistoryRef` que se mantém sincronizado com o state, e usar o ref dentro de `sendAudioToVoiceChat`:
+
+```typescript
+const conversationHistoryRef = useRef(conversationHistory);
+useEffect(() => { conversationHistoryRef.current = conversationHistory; }, [conversationHistory]);
+```
+
+Depois em `sendAudioToVoiceChat`:
+```typescript
+body: JSON.stringify({
+  audioBase64,
+  history: conversationHistoryRef.current, // usar ref em vez de state
+  patientContext,
+}),
+```
+
+**Correcao 2 — Ajuste VAD**:
+```typescript
+const SILENCE_THRESHOLD = 20;      // era 30
+const MIN_RECORDING_DURATION_MS = 1000; // era 800
+```
+
