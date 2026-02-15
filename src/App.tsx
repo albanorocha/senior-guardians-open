@@ -13,6 +13,7 @@ import Medications from "./pages/Medications";
 import CheckIn from "./pages/CheckIn";
 import History from "./pages/History";
 import Admin from "./pages/Admin";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import TtsTest from "./pages/TtsTest";
 
@@ -37,6 +38,7 @@ const App = () => (
               <Route path="/check-in" element={<ProtectedRoute><CheckIn /></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/tts-test" element={<TtsTest />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
