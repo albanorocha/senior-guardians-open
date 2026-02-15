@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useImpersonation } from '@/hooks/useImpersonation';
 import AppNav from '@/components/AppNav';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ const emptyForm: MedForm = { name: '', dosage: '', frequency: 'once daily', time
 
 const Medications = () => {
   const { user } = useAuth();
+  const { effectiveUserId } = useImpersonation();
   const { toast } = useToast();
   const [meds, setMeds] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,13 +38,13 @@ const Medications = () => {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchMeds = async () => {
-    if (!user) return;
-    const { data } = await supabase.from('medications').select('*').eq('user_id', user.id).order('created_at');
+    if (!effectiveUserId) return;
+    const { data } = await supabase.from('medications').select('*').eq('user_id', effectiveUserId).order('created_at');
     setMeds(data || []);
     setLoading(false);
   };
 
-  useEffect(() => { fetchMeds(); }, [user]);
+  useEffect(() => { fetchMeds(); }, [effectiveUserId]);
 
   const openAdd = () => { setEditingId(null); setForm(emptyForm); setDialogOpen(true); };
   const openEdit = (med: any) => {

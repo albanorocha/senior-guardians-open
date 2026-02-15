@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useImpersonation } from '@/hooks/useImpersonation';
 import AppNav from '@/components/AppNav';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ const moodEmoji: Record<string, string> = {
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const { effectiveUserId } = useImpersonation();
   const [profile, setProfile] = useState<any>(null);
   const [medications, setMedications] = useState<any[]>([]);
   const [checkIns, setCheckIns] = useState<any[]>([]);
@@ -30,15 +32,16 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (!effectiveUserId) return;
+    const uid = effectiveUserId;
     const fetchData = async () => {
       const [profileRes, medsRes, checkInsRes, alertsRes, remindersRes, healthRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('medications').select('*').eq('user_id', user.id).eq('active', true).order('created_at'),
-        supabase.from('check_ins').select('*').eq('user_id', user.id).order('scheduled_at', { ascending: false }).limit(5),
-        supabase.from('alerts').select('*').eq('user_id', user.id).eq('acknowledged', false).order('created_at', { ascending: false }),
-        supabase.from('scheduled_reminders').select('*').eq('user_id', user.id).eq('status', 'pending').order('created_at', { ascending: false }),
-        supabase.from('health_logs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('profiles').select('*').eq('id', uid).single(),
+        supabase.from('medications').select('*').eq('user_id', uid).eq('active', true).order('created_at'),
+        supabase.from('check_ins').select('*').eq('user_id', uid).order('scheduled_at', { ascending: false }).limit(5),
+        supabase.from('alerts').select('*').eq('user_id', uid).eq('acknowledged', false).order('created_at', { ascending: false }),
+        supabase.from('scheduled_reminders').select('*').eq('user_id', uid).eq('status', 'pending').order('created_at', { ascending: false }),
+        supabase.from('health_logs').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(5),
       ]);
       setProfile(profileRes.data);
       setMedications(medsRes.data || []);
@@ -52,7 +55,7 @@ const Dashboard = () => {
       const { data: todayCheckIns } = await supabase
         .from('check_ins')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .gte('scheduled_at', todayStart);
       if (todayCheckIns && todayCheckIns.length > 0) {
         const todayCiIds = todayCheckIns.map(c => c.id);
@@ -69,7 +72,7 @@ const Dashboard = () => {
 
       // Calculate adherence from last 30 days
       const thirtyDaysAgo = subDays(new Date(), 30).toISOString();
-      const { data: recentCheckIns } = await supabase.from('check_ins').select('id, scheduled_at').eq('user_id', user.id).gte('scheduled_at', thirtyDaysAgo).eq('status', 'completed');
+      const { data: recentCheckIns } = await supabase.from('check_ins').select('id, scheduled_at').eq('user_id', uid).gte('scheduled_at', thirtyDaysAgo).eq('status', 'completed');
       if (recentCheckIns && recentCheckIns.length > 0) {
         const ciIds = recentCheckIns.map(c => c.id);
         const { data: allResponses } = await supabase.from('check_in_responses').select('check_in_id, taken').in('check_in_id', ciIds);
@@ -98,7 +101,7 @@ const Dashboard = () => {
       setLoading(false);
     };
     fetchData();
-  }, [user]);
+  }, [effectiveUserId]);
 
   const acknowledgeAlert = async (alertId: string) => {
     await supabase.from('alerts').update({ acknowledged: true }).eq('id', alertId);
