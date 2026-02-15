@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -69,12 +69,6 @@ const Login = () => {
               {submitting ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-          <p className="mt-6 text-center text-senior-sm text-muted-foreground">
-            Don't have an account?{' '}
-            <Link to="/signup" className="text-primary font-semibold hover:underline">
-              Sign up
-            </Link>
-          </p>
         </CardContent>
       </Card>
     </div>
