@@ -63,7 +63,7 @@ const CheckIn = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -92,7 +92,7 @@ const CheckIn = () => {
     streamRef.current = null;
     audioContextRef.current = null;
     analyserRef.current = null;
-    audioRef.current = null;
+    
     isRecordingRef.current = false;
     isSpeakingRef.current = false;
     silenceStartRef.current = null;
@@ -290,12 +290,10 @@ const CheckIn = () => {
       };
       setPatientContext(ctx);
 
-      // --- AUDIO UNLOCK: Create and unlock Audio element during user gesture ---
-      const audio = new Audio();
-      // Play a silent audio to unlock the element for future use
-      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-      await audio.play().catch(() => {});
-      audioRef.current = audio;
+      // --- AUDIO UNLOCK: Create and resume AudioContext during user gesture ---
+      const unlockCtx = new AudioContext();
+      await unlockCtx.resume();
+      unlockCtx.close();
 
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -450,38 +448,26 @@ const CheckIn = () => {
     }
   };
 
-  const playAudio = (base64: string) => {
+  const playAudio = async (base64: string) => {
     setIsPlaying(true);
     try {
-      // Convert base64 to Blob to avoid data URI size limits
       const binaryStr = atob(base64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {
         bytes[i] = binaryStr.charCodeAt(i);
       }
-      const blob = new Blob([bytes], { type: 'audio/wav' });
-      const url = URL.createObjectURL(blob);
 
-      const audio = audioRef.current || new Audio();
-      if (!audioRef.current) audioRef.current = audio;
-
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
+      // Use Web Audio API which supports more formats (including 24kHz WAV)
+      const playbackCtx = new AudioContext();
+      const audioBuffer = await playbackCtx.decodeAudioData(bytes.buffer.slice(0));
+      const source = playbackCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(playbackCtx.destination);
+      source.onended = () => {
         setIsPlaying(false);
+        playbackCtx.close();
       };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        setIsPlaying(false);
-      };
-      audio.src = url;
-      // Small delay to let browser load blob URL
-      setTimeout(() => {
-        audio.play().catch((err) => {
-          console.error('[CheckIn] Audio play() failed:', err);
-          URL.revokeObjectURL(url);
-          setIsPlaying(false);
-        });
-      }, 50);
+      source.start(0);
     } catch (err) {
       console.error('[CheckIn] Audio playback error:', err);
       setIsPlaying(false);
