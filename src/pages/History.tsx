@@ -148,13 +148,20 @@ const History = () => {
                           {ciAlerts.length > 0 && (
                             <div className="space-y-1 pt-2 border-t border-border">
                               <p className="text-xs font-semibold text-muted-foreground">🚨 Alerts</p>
-                              {ciAlerts.map((a: any) => (
-                                <div key={a.id} className={`flex items-center gap-2 text-sm p-1.5 rounded ${a.type === 'emergency' ? 'bg-destructive/10' : 'bg-yellow-500/10'}`}>
-                                  <span>{a.type === 'emergency' ? '🔴' : '🟡'}</span>
-                                  <span>{a.reason}</span>
-                                  {a.tag && <Badge variant="outline" className="text-xs">{a.tag}</Badge>}
-                                </div>
-                              ))}
+                              {ciAlerts.map((a: any) => {
+                                const isEmergency = a.type === 'emergency';
+                                const isCaregiver = a.type === 'caregiver';
+                                const bgClass = isEmergency ? 'bg-destructive/10' : isCaregiver ? 'bg-blue-500/10' : 'bg-yellow-500/10';
+                                const emoji = isEmergency ? '🔴' : isCaregiver ? '🔵' : '🟡';
+                                return (
+                                  <div key={a.id} className={`flex items-center gap-2 text-sm p-1.5 rounded ${bgClass}`}>
+                                    <span>{emoji}</span>
+                                    <span>{a.reason}</span>
+                                    {isCaregiver && <span className="text-xs text-blue-600 font-medium">Caregiver notified</span>}
+                                    {a.tag && <Badge variant="outline" className="text-xs">{a.tag}</Badge>}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
 

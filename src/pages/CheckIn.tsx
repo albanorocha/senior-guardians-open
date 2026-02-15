@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
-import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, Send } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, Send, AlertTriangle, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type CallState = 'incoming' | 'active' | 'summary';
@@ -31,7 +31,7 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
 ];
 
 const SILENCE_THRESHOLD = 20;
-const SILENCE_TIMEOUT_MS = 2000;
+const SILENCE_TIMEOUT_MS = 1000;
 const VAD_CHECK_INTERVAL_MS = 100;
 const MIN_BLOB_SIZE = 5000;
 const MIN_RECORDING_DURATION_MS = 1000;
@@ -776,6 +776,39 @@ const CheckIn = () => {
               <div className="h-8" />
             )}
             <p className="text-senior-lg font-mono mt-1">{formatTime(elapsed)}</p>
+
+            {/* Real-time alerts during call */}
+            <AnimatePresence>
+              {callAlerts.length > 0 && (
+                <div className="w-full max-w-md mt-3 space-y-2">
+                  {callAlerts.map((alert, idx) => (
+                    <motion.div
+                      key={`call-alert-${idx}`}
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border backdrop-blur-sm ${
+                        alert.type === 'emergency'
+                          ? 'border-red-400/60 bg-red-500/20 text-red-100'
+                          : 'border-blue-400/60 bg-blue-500/20 text-blue-100'
+                      }`}
+                    >
+                      {alert.type === 'emergency' ? (
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-red-300" />
+                      ) : (
+                        <Bell className="h-4 w-4 shrink-0 text-blue-300" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold">
+                          {alert.type === 'emergency' ? '🚨 Emergency Alert' : '📋 Caregiver Notified'}
+                        </p>
+                        <p className="text-xs opacity-90 truncate">{alert.reason}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </AnimatePresence>
 
             {/* Chat panel with text input */}
             <div className="w-full max-w-md flex-1 mt-4 mb-4 min-h-0 flex flex-col">
