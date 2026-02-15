@@ -34,29 +34,8 @@ serve(async (req) => {
       });
     }
 
-    // Save context to pre_call_context table if userId and variables are provided
-    if (userId && variables) {
-      console.log('[atoms-session] Saving pre-call context for user:', userId);
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-      const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-      const { error: upsertError } = await supabase
-        .from('pre_call_context')
-        .upsert(
-          { user_id: userId, variables, created_at: new Date().toISOString() },
-          { onConflict: 'user_id' }
-        );
-
-      if (upsertError) {
-        console.error('[atoms-session] Error saving context:', upsertError.message);
-      } else {
-        console.log('[atoms-session] Context saved successfully');
-      }
-    }
-
-    // Create webcall without variables (the Pre Call API webhook will provide them)
-    const webcallBody = JSON.stringify({ agentId });
+    // Pass variables directly in the webcall request
+    const webcallBody = JSON.stringify({ agentId, variables: variables || {} });
     console.log('[atoms-session] Creating webcall - URL: https://atoms-api.smallest.ai/api/v1/conversation/webcall');
     console.log('[atoms-session] Creating webcall - body:', webcallBody);
     
