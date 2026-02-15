@@ -1,71 +1,49 @@
 
 
-# Fix Audio Playback and Add Always-On Microphone
+# Fix Clara's Voice, Add Text Input, and Improve VAD
 
-## Problem 1: Cannot hear Clara's voice
+## Problem Analysis
 
-The `playAudio` function (line 285) calls `new Audio().play()` after an async fetch completes. Browsers block audio playback unless it's initiated from a direct user gesture. Since the audio plays after the edge function response (async), the browser silently blocks it.
+Three issues identified from logs and code:
 
-**Fix**: Pre-create and "unlock" an `Audio` element during the user's click gesture (answering the call or pressing talk), then reuse it for playback later.
+1. **Clara's voice not playing**: The TTS is working (edge function logs show audio sizes of 276-545KB), but the browser fails to play it. The issue is that WAV audio of 400KB+ becomes 500KB+ base64, creating extremely large `data:audio/wav;base64,...` URIs that browsers struggle with. Solution: convert the base64 to a Blob and use `URL.createObjectURL()` instead.
 
-## Problem 2: Microphone should always be on
+2. **No text input**: Currently the only way to communicate is via voice. Need a text input box in the active call UI.
 
-Replace push-to-talk with a continuous recording + silence detection approach:
-- Keep the microphone recording at all times during the active call
-- Use a simple volume-based Voice Activity Detection (VAD): monitor audio levels via `AnalyserNode`
-- When the user stops speaking (silence for ~1.5 seconds), automatically stop and send the audio
-- When Clara finishes speaking, automatically resume listening
+3. **VAD too sensitive**: Edge function logs show many empty transcriptions (`Transcribed text: `) from small audio clips (27-66KB) that are just background noise. The `SILENCE_THRESHOLD` of 15 is too low, and every empty transcription triggers an error toast.
 
 ## Changes
 
-### `src/pages/CheckIn.tsx`
+### 1. Fix audio playback in `src/pages/CheckIn.tsx`
 
-**Audio playback fix:**
-- In `handleAnswer`, immediately after the user clicks the green phone button, create an `Audio` element and call `audio.play().catch(() => {})` to unlock it (line ~129)
-- Store this unlocked element in `audioRef`
-- In `playAudio` (line 285), reuse the existing `audioRef.current` instead of creating a new `Audio` -- just set its `.src` property and call `.play()`
+In `playAudio()` (line 417): Instead of setting `audio.src` to a data URI, convert the base64 string to a `Blob`, create an object URL with `URL.createObjectURL()`, and set that as the source. This avoids the browser's data URI size limits.
 
-**Always-on microphone (VAD):**
-- Remove push-to-talk button; replace with a microphone status indicator
-- After `handleAnswer` sets up the `MediaRecorder`, also create an `AudioContext` + `AnalyserNode` from the same stream
-- Start a monitoring loop that checks audio volume every 100ms
-- When volume exceeds a threshold, start recording (if not already)
-- When volume drops below threshold for ~1.5 seconds, stop recording and send audio
-- While Clara is speaking (`isPlaying`) or processing (`isProcessing`), pause the VAD detection
-- After Clara finishes speaking, automatically resume listening
-- Show visual feedback: "Listening...", "You're speaking...", "Processing...", "Clara is speaking..."
-
-### Technical details
-
-**Audio unlock pattern:**
-```typescript
-// In handleAnswer (user gesture context):
-const audio = new Audio();
-audio.play().catch(() => {}); // unlock
-audioRef.current = audio;
-
-// In playAudio:
-const audio = audioRef.current!;
-audio.src = `data:audio/wav;base64,${base64}`;
-await audio.play();
+```
+const binaryStr = atob(base64);
+const bytes = new Uint8Array(binaryStr.length);
+for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+const blob = new Blob([bytes], { type: 'audio/wav' });
+const url = URL.createObjectURL(blob);
+audio.src = url;
+audio.onended = () => { URL.revokeObjectURL(url); setIsPlaying(false); };
 ```
 
-**VAD with AnalyserNode:**
-```typescript
-const audioContext = new AudioContext();
-const source = audioContext.createMediaStreamSource(stream);
-const analyser = audioContext.createAnalyser();
-analyser.fftSize = 512;
-source.connect(analyser);
+### 2. Add text input to active call UI in `src/pages/CheckIn.tsx`
 
-// Monitor loop checks getByteFrequencyData average
-// If avg > threshold (e.g. 15) -> speech detected
-// If avg < threshold for 1500ms -> silence, send recording
-```
+- Add a `textInput` state and a `Send` icon import
+- Replace the transcript-only panel (lines 567-589) with a chat-style interface that includes a text input bar at the bottom
+- The text input sends messages via `sendToVoiceChat()` (already exists, line 311) which skips STT and goes directly to LLM + TTS
+- Input clears after sending and is disabled while processing
 
-**UI changes in active call:**
-- Remove hold-to-talk button
-- Show a microphone icon with status text: "Listening..." / "Speaking..." / "Processing..." / "Clara is speaking..."
-- Add a pulsing animation around the mic icon when the user is speaking
-- Keep the end call button
+### 3. Improve VAD reliability in `src/pages/CheckIn.tsx`
+
+- Increase `SILENCE_THRESHOLD` from 15 to 25 to reduce background noise triggers
+- Increase `SILENCE_TIMEOUT_MS` from 1500 to 2000 for more natural pauses
+- Add a minimum blob size check (skip blobs under 5000 bytes) in `recorder.onstop`
+- In `sendAudioToVoiceChat`: when the edge function returns 400 with "Could not transcribe", do NOT show an error toast -- just silently resume listening. This prevents the spam of error toasts seen in the logs.
+- Increase minimum recording duration from 500ms to 800ms
+
+### 4. Minor fix: AudioVisualizer ref warning
+
+The console shows a warning about function components receiving refs. Wrap `AudioVisualizer` usage to avoid passing a ref to it (or convert it to use `forwardRef` if needed). Since it is defined inline and no ref is passed to it, this warning likely comes from framer-motion's `AnimatePresence`. This will be addressed by ensuring `AudioVisualizer` is not wrapped in a motion component that injects refs.
 
