@@ -136,8 +136,14 @@ const CheckIn = () => {
         current_time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
       };
 
+      console.log('[CheckIn] Variables being sent:', JSON.stringify(variables));
+      console.log('[CheckIn] UserId:', user?.id);
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const requestBody = { agentId: '6990ef650d1c87f0c9a42402', variables, userId: user?.id };
+      console.log('[CheckIn] Request body to atoms-session:', JSON.stringify(requestBody));
+
       const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
         method: 'POST',
         headers: {
@@ -145,10 +151,12 @@ const CheckIn = () => {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
         },
-        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402', variables, userId: user?.id }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await res.json();
+      console.log('[CheckIn] atoms-session response status:', res.status);
+      console.log('[CheckIn] atoms-session response data:', JSON.stringify(data));
 
       if (!res.ok) {
         throw new Error(data.error || 'Failed to start session');

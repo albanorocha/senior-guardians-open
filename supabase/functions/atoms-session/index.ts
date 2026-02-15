@@ -12,7 +12,12 @@ serve(async (req) => {
   }
 
   try {
-    const { agentId, variables, userId } = await req.json();
+    const rawBody = await req.text();
+    console.log('[atoms-session] Raw body received:', rawBody);
+    
+    const { agentId, variables, userId } = JSON.parse(rawBody);
+    console.log('[atoms-session] Parsed - agentId:', agentId, 'userId:', userId);
+    console.log('[atoms-session] Parsed - variables:', JSON.stringify(variables));
 
     if (!agentId) {
       return new Response(JSON.stringify({ error: 'agentId is required' }), {
@@ -51,17 +56,24 @@ serve(async (req) => {
     }
 
     // Create webcall without variables (the Pre Call API webhook will provide them)
-    console.log('[atoms-session] Creating webcall for agent:', agentId);
+    const webcallBody = JSON.stringify({ agentId });
+    console.log('[atoms-session] Creating webcall - URL: https://atoms-api.smallest.ai/api/v1/conversation/webcall');
+    console.log('[atoms-session] Creating webcall - body:', webcallBody);
+    
     const response = await fetch('https://atoms-api.smallest.ai/api/v1/conversation/webcall', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ agentId }),
+      body: webcallBody,
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log('[atoms-session] Atoms API response status:', response.status);
+    console.log('[atoms-session] Atoms API response body:', responseText);
+
+    const data = JSON.parse(responseText);
 
     if (!response.ok) {
       return new Response(JSON.stringify({ error: data.message || 'Failed to create session' }), {
