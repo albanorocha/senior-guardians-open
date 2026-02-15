@@ -106,7 +106,7 @@ const TtsTest = () => {
     if (!audioBase64 || !audioRefA.current) return;
     setMethodA({ status: "playing" });
     addLog("[A] Tentando data URL...");
-    const dataUrl = `data:audio/wav;base64,${audioBase64}`;
+    const dataUrl = `data:audio/mpeg;base64,${audioBase64}`;
     audioRefA.current.src = dataUrl;
     audioRefA.current.onended = () => {
       setMethodA({ status: "success" });
@@ -135,7 +135,7 @@ const TtsTest = () => {
       for (let i = 0; i < binaryStr.length; i++) {
         bytes[i] = binaryStr.charCodeAt(i);
       }
-      const blob = new Blob([bytes], { type: "audio/wav" });
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
       if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
       const url = URL.createObjectURL(blob);
       blobUrlRef.current = url;

@@ -152,7 +152,7 @@ Always address the patient by name. Never use markdown or formatting — speak n
         voice_id: 'sophia',
         sample_rate: 24000,
         speed: 1,
-        add_wav_header: true,
+        output_format: 'mp3',
       }),
     });
 
