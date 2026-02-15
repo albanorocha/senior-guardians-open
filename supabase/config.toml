@@ -1,7 +1,4 @@
 project_id = "rlbratdaqtdpbifkceds"
 
-[functions.atoms-precall]
-verify_jwt = false
-
-[functions.atoms-save-context]
+[functions.voice-chat]
 verify_jwt = false

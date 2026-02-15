@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AtomsClient } from 'atoms-client-sdk';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -9,9 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, PhoneOff, PhoneIncoming, X, Save, Check, Loader2, Mic } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
@@ -20,7 +18,7 @@ type Mood = 'happy' | 'neutral' | 'confused' | 'distressed';
 interface TranscriptMessage {
   text: string;
   timestamp: number;
-  sender: 'agent' | 'system';
+  sender: 'user' | 'agent';
 }
 
 const moodOptions: { value: Mood; emoji: string; label: string }[] = [
@@ -42,27 +40,31 @@ const CheckIn = () => {
   const [mood, setMood] = useState<Mood>('neutral');
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [prepStep, setPrepStep] = useState<'profile' | 'context' | 'connecting' | 'done'>('profile');
   const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
-  const [isAgentTalking, setIsAgentTalking] = useState(false);
-  const [preparedVariables, setPreparedVariables] = useState<{
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [patientContext, setPatientContext] = useState<{
     patientName: string;
     patientAge: number | string | null;
     medications: { name: string; dosage: string }[];
   } | null>(null);
+
   const timerRef = useRef<ReturnType<typeof setInterval>>();
-  const atomsClientRef = useRef<AtomsClient | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       clearInterval(timerRef.current);
-      if (atomsClientRef.current) {
-        try { atomsClientRef.current.stopSession(); } catch {}
-        atomsClientRef.current = null;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
       }
+      mediaRecorderRef.current?.stream?.getTracks().forEach(t => t.stop());
     };
   }, []);
 
@@ -73,6 +75,7 @@ const CheckIn = () => {
     }
   }, [transcripts]);
 
+  // Load medications
   useEffect(() => {
     if (!user) return;
     supabase.from('medications').select('*').eq('user_id', user.id).eq('active', true).then(({ data }) => {
@@ -83,6 +86,7 @@ const CheckIn = () => {
     });
   }, [user]);
 
+  // Timer
   useEffect(() => {
     if (callState === 'active' && callStart) {
       timerRef.current = setInterval(() => {
@@ -98,25 +102,22 @@ const CheckIn = () => {
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
-  const handleEndCall = async () => {
+  const handleEndCall = () => {
     clearInterval(timerRef.current);
-    if (atomsClientRef.current) {
-      try {
-        await atomsClientRef.current.stopSession();
-      } catch (err) {
-        console.error('Error stopping session:', err);
-      }
-      atomsClientRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
     }
-    setConnecting(false);
-    setIsAgentTalking(false);
+    mediaRecorderRef.current?.stream?.getTracks().forEach(t => t.stop());
+    setIsRecording(false);
+    setIsPlaying(false);
 
     // Pre-fill summary with transcript
     if (transcripts.length > 0) {
       const transcriptText = transcripts
         .map(t => {
           const time = new Date(t.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          return `[${time}] Clara: ${t.text}`;
+          const label = t.sender === 'user' ? 'You' : 'Clara';
+          return `[${time}] ${label}: ${t.text}`;
         })
         .join('\n');
       setSummary(transcriptText);
@@ -126,22 +127,11 @@ const CheckIn = () => {
   };
 
   const handleAnswer = async () => {
-    if (connecting) return;
-    setConnecting(true);
-    setPrepStep('profile');
     setCallState('preparing');
     setTranscripts([]);
-    setIsAgentTalking(false);
+    setConversationHistory([]);
 
     try {
-      // Stop any previous session
-      if (atomsClientRef.current) {
-        try { atomsClientRef.current.stopSession(); } catch {}
-        atomsClientRef.current = null;
-      }
-
-      // === PHASE 1: Prepare data ===
-
       // Fetch patient profile
       let patientName = 'Patient';
       let patientAge: number | null = null;
@@ -157,144 +147,175 @@ const CheckIn = () => {
         }
       }
 
-      // Format medications string
-      let medicationsStr = 'No medications registered.';
-      if (medications.length > 0) {
-        medicationsStr = medications.map((med, i) => {
-          const parts = [`${i + 1}. ${med.name} - ${med.dosage}, ${med.frequency}`];
-          if (med.instructions) parts.push(`Instructions: ${med.instructions}`);
-          return parts.join('. ');
-        }).join('\n');
-      }
-
-      const now = new Date();
-      const variables = {
-        patient_name: patientName,
-        patient_age: patientAge ?? 'unknown',
-        medications: medicationsStr,
-        current_date: now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-        current_time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-      };
-
-      setPreparedVariables({
-        patientName: patientName,
-        patientAge: patientAge,
+      const ctx = {
+        patientName,
+        patientAge,
         medications: medications.map(m => ({ name: m.name, dosage: m.dosage })),
-      });
+      };
+      setPatientContext(ctx);
 
-      console.log('[CheckIn] Variables prepared:', JSON.stringify(variables));
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = recorder;
 
-      // Save context FIRST via dedicated function
-      setPrepStep('context');
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-      const saveRes = await fetch(`${supabaseUrl}/functions/v1/atoms-save-context`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-        body: JSON.stringify({ variables, userId: user?.id }),
-      });
-
-      const saveData = await saveRes.json();
-      if (!saveRes.ok || !saveData.success) {
-        throw new Error(saveData.error || 'Failed to save context');
-      }
-      console.log('[CheckIn] Context saved successfully');
-
-      // === PHASE 2: Create call (data is already persisted) ===
-      setPrepStep('connecting');
       setCallStart(new Date());
+      setCallState('active');
 
-      const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402' }),
-      });
-
-      const data = await res.json();
-      console.log('[CheckIn] atoms-session response:', res.status);
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to start session');
-      }
-
-      const client = new AtomsClient();
-      atomsClientRef.current = client;
-
-      client.on('session_started', () => {
-        console.log('Atoms voice session started');
-        setConnecting(false);
-        setCallState('active');
-      });
-
-      client.on('session_ended', () => {
-        console.log('Atoms voice session ended by agent');
-        handleEndCall();
-      });
-
-      // Debug: log all events from SDK
-      const originalEmit = (client as any).emit?.bind(client);
-      if (originalEmit) {
-        (client as any).emit = (event: string, ...args: any[]) => {
-          console.log(`[Atoms SDK Event] "${event}"`, ...args);
-          return originalEmit(event, ...args);
-        };
-      }
-
-      client.on('transcript', (data: any) => {
-        console.log('[CheckIn] Transcript event received:', JSON.stringify(data));
-        const text = typeof data === 'string' ? data : data?.text || data?.transcript || data?.message || JSON.stringify(data);
-        setTranscripts(prev => [...prev, {
-          text,
-          timestamp: data?.timestamp || Date.now(),
-          sender: 'agent',
-        }]);
-      });
-
-      // Alternative event names as fallback
-      for (const eventName of ['message', 'agent_transcript', 'text', 'captions', 'caption']) {
-        client.on(eventName as any, (data: any) => {
-          console.log(`[CheckIn] Alternative event "${eventName}" received:`, JSON.stringify(data));
-          const text = typeof data === 'string' ? data : data?.text || data?.transcript || data?.message || JSON.stringify(data);
-          setTranscripts(prev => [...prev, {
-            text,
-            timestamp: data?.timestamp || Date.now(),
-            sender: 'agent',
-          }]);
-        });
-      }
-
-      client.on('agent_start_talking', () => {
-        console.log('[CheckIn] agent_start_talking');
-        setIsAgentTalking(true);
-      });
-      client.on('agent_stop_talking', () => {
-        console.log('[CheckIn] agent_stop_talking');
-        setIsAgentTalking(false);
-      });
-
-      await client.startSession({
-        accessToken: data.data.token,
-        mode: 'webcall',
-        host: data.data.host,
-      });
+      // Send an initial greeting by calling the LLM with a "start" message
+      await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx);
     } catch (err: any) {
       console.error('Failed to start voice session:', err);
-      setConnecting(false);
       setCallState('incoming');
       toast({
         title: 'Failed to start call',
-        description: err.message,
+        description: err.message?.includes('Permission') ? 'Microphone access is required.' : err.message,
         variant: 'destructive',
       });
+    }
+  };
+
+  const sendToVoiceChat = async (text: string, ctx?: typeof patientContext) => {
+    const context = ctx || patientContext;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    // Add user message to transcript & history
+    const newUserMsg = { role: 'user' as const, content: text };
+    const updatedHistory = [...conversationHistory, newUserMsg];
+    setConversationHistory(updatedHistory);
+    setTranscripts(prev => [...prev, { text, timestamp: Date.now(), sender: 'user' }]);
+
+    setIsProcessing(true);
+
+    try {
+      // For the initial greeting, we send text directly instead of audio
+      const res = await fetch(`${supabaseUrl}/functions/v1/voice-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          audioBase64: null,
+          textInput: text,
+          history: updatedHistory,
+          patientContext: context,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Voice chat failed');
+      }
+
+      handleVoiceResponse(data);
+    } catch (err: any) {
+      console.error('[CheckIn] Voice chat error:', err);
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const sendAudioToVoiceChat = async (audioBlob: Blob) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+    setIsProcessing(true);
+
+    try {
+      // Convert blob to base64
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode(...chunk);
+      }
+      const audioBase64 = btoa(binary);
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/voice-chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          audioBase64,
+          history: conversationHistory,
+          patientContext,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Voice chat failed');
+      }
+
+      // Add user transcript
+      if (data.userText) {
+        setTranscripts(prev => [...prev, { text: data.userText, timestamp: Date.now(), sender: 'user' }]);
+        setConversationHistory(prev => [...prev, { role: 'user', content: data.userText }]);
+      }
+
+      handleVoiceResponse(data);
+    } catch (err: any) {
+      console.error('[CheckIn] Voice chat error:', err);
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVoiceResponse = (data: { userText?: string; agentText: string; audioBase64?: string | null }) => {
+    // Add agent transcript
+    setTranscripts(prev => [...prev, { text: data.agentText, timestamp: Date.now(), sender: 'agent' }]);
+    setConversationHistory(prev => [...prev, { role: 'assistant', content: data.agentText }]);
+
+    // Play audio if available
+    if (data.audioBase64) {
+      playAudio(data.audioBase64);
+    }
+  };
+
+  const playAudio = (base64: string) => {
+    setIsPlaying(true);
+    const audio = new Audio(`data:audio/wav;base64,${base64}`);
+    audioRef.current = audio;
+    audio.onended = () => setIsPlaying(false);
+    audio.onerror = () => setIsPlaying(false);
+    audio.play().catch(() => setIsPlaying(false));
+  };
+
+  const startRecording = () => {
+    if (!mediaRecorderRef.current || isProcessing || isPlaying) return;
+
+    chunksRef.current = [];
+    const recorder = mediaRecorderRef.current;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      if (blob.size > 0) {
+        sendAudioToVoiceChat(blob);
+      }
+    };
+
+    recorder.start();
+    setIsRecording(true);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
   };
 
@@ -347,19 +368,6 @@ const CheckIn = () => {
     </div>
   );
 
-  const PrepStep = ({ label, done, active }: { label: string; done: boolean; active: boolean }) => (
-    <div className={`flex items-center gap-3 text-primary-foreground transition-opacity ${!done && !active ? 'opacity-40' : 'opacity-100'}`}>
-      {done ? (
-        <Check className="h-5 w-5 text-green-300" />
-      ) : active ? (
-        <Loader2 className="h-5 w-5 animate-spin" />
-      ) : (
-        <div className="h-5 w-5 rounded-full border-2 border-primary-foreground/40" />
-      )}
-      <span className="text-senior-base">{label}</span>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary via-primary/90 to-accent">
       <AnimatePresence mode="wait">
@@ -389,9 +397,8 @@ const CheckIn = () => {
               </Button>
               <Button
                 onClick={handleAnswer}
-                disabled={connecting}
                 size="lg"
-                className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground disabled:opacity-50"
+                className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground"
               >
                 <Phone className="h-7 w-7" />
               </Button>
@@ -408,54 +415,11 @@ const CheckIn = () => {
               </div>
               <div className="absolute inset-0 w-28 h-28 rounded-full border-4 border-primary-foreground/30 animate-spin" style={{ borderTopColor: 'transparent', animationDuration: '1.5s' }} />
             </div>
-            <h1 className="text-senior-2xl font-bold mb-6">Preparing...</h1>
-            <div className="space-y-4 w-full max-w-xs">
-              <PrepStep label="Loading profile" done={prepStep !== 'profile'} active={prepStep === 'profile'} />
-              <PrepStep label="Sending data" done={prepStep === 'connecting' || prepStep === 'done'} active={prepStep === 'context'} />
-              <PrepStep label="Connecting to Clara" done={prepStep === 'done'} active={prepStep === 'connecting'} />
+            <h1 className="text-senior-2xl font-bold mb-6">Connecting...</h1>
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-senior-base">Setting up your session</span>
             </div>
-
-            {/* Patient data card */}
-            {preparedVariables && prepStep !== 'profile' && (
-              <div className="w-full max-w-xs mt-6 rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-4 space-y-3">
-                <h3 className="text-senior-sm font-semibold">Patient data</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="opacity-60">Name</span>
-                    <span className="font-medium">{preparedVariables.patientName}</span>
-                  </div>
-                  {preparedVariables.patientAge && preparedVariables.patientAge !== 'unknown' && (
-                    <div className="flex justify-between">
-                      <span className="opacity-60">Age</span>
-                      <span className="font-medium">{preparedVariables.patientAge} years</span>
-                    </div>
-                  )}
-                  {preparedVariables.medications.length > 0 && (
-                    <div>
-                      <span className="opacity-60">Medications</span>
-                      <ol className="mt-1 space-y-0.5 list-decimal list-inside">
-                        {preparedVariables.medications.map((med, i) => (
-                          <li key={i} className="text-xs">
-                            <span className="font-medium">{med.name}</span> — {med.dosage}
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                </div>
-                <div className="pt-2 border-t border-primary-foreground/20">
-                  {prepStep === 'context' ? (
-                    <span className="flex items-center gap-2 text-xs opacity-70">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Sending to Clara...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2 text-xs text-green-300">
-                      <Check className="h-3 w-3" /> Clara has access to this data
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
           </motion.div>
         )}
 
@@ -464,22 +428,27 @@ const CheckIn = () => {
           <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center min-h-screen px-4 pt-8 pb-4 text-primary-foreground">
             <div className="relative w-20 h-20 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-2xl font-bold mb-2">
               C
-              {isAgentTalking && (
+              {isPlaying && (
                 <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-primary-foreground/50 animate-pulse" />
               )}
             </div>
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-senior-lg font-bold">Clara</h2>
-              {isAgentTalking && (
+              {isPlaying && (
                 <span className="flex items-center gap-1 text-sm opacity-80">
                   <Mic className="h-3 w-3" /> Speaking...
                 </span>
               )}
+              {isProcessing && (
+                <span className="flex items-center gap-1 text-sm opacity-80">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                </span>
+              )}
             </div>
-            {connecting ? (
-              <p className="text-senior-base opacity-80 animate-pulse">Connecting...</p>
-            ) : (
+            {isPlaying ? (
               <AudioVisualizer />
+            ) : (
+              <div className="h-8" />
             )}
             <p className="text-senior-lg font-mono mt-1">{formatTime(elapsed)}</p>
 
@@ -487,7 +456,7 @@ const CheckIn = () => {
             <div className="w-full max-w-md flex-1 mt-4 mb-4 min-h-0">
               <div
                 ref={scrollRef}
-                className="h-[40vh] overflow-y-auto rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-3 space-y-2"
+                className="h-[35vh] overflow-y-auto rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-3 space-y-2"
               >
                 {transcripts.length === 0 && (
                   <p className="text-sm opacity-50 text-center mt-8">
@@ -495,11 +464,12 @@ const CheckIn = () => {
                   </p>
                 )}
                 {transcripts.map((t, i) => (
-                  <div key={i} className="flex flex-col">
-                    <div className="bg-primary-foreground/15 rounded-lg px-3 py-2 max-w-[90%]">
+                  <div key={i} className={`flex flex-col ${t.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`rounded-lg px-3 py-2 max-w-[90%] ${t.sender === 'user' ? 'bg-primary-foreground/25' : 'bg-primary-foreground/15'}`}>
+                      <p className="text-xs opacity-60 mb-0.5">{t.sender === 'user' ? 'You' : 'Clara'}</p>
                       <p className="text-sm leading-relaxed">{t.text}</p>
                     </div>
-                    <span className="text-[10px] opacity-40 mt-0.5 ml-1">
+                    <span className="text-[10px] opacity-40 mt-0.5 mx-1">
                       {new Date(t.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
                   </div>
@@ -507,14 +477,41 @@ const CheckIn = () => {
               </div>
             </div>
 
-            <Button
-              onClick={handleEndCall}
-              variant="destructive"
-              size="lg"
-              className="w-16 h-16 rounded-full p-0"
-            >
-              <PhoneOff className="h-7 w-7" />
-            </Button>
+            {/* Controls */}
+            <div className="flex items-center gap-6">
+              {/* Hold to talk button */}
+              <Button
+                onPointerDown={startRecording}
+                onPointerUp={stopRecording}
+                onPointerLeave={stopRecording}
+                disabled={isProcessing || isPlaying}
+                size="lg"
+                className={`w-20 h-20 rounded-full p-0 transition-all ${
+                  isRecording
+                    ? 'bg-red-500 hover:bg-red-600 scale-110'
+                    : 'bg-primary-foreground/20 hover:bg-primary-foreground/30'
+                } disabled:opacity-40`}
+              >
+                {isRecording ? (
+                  <MicOff className="h-8 w-8" />
+                ) : (
+                  <Mic className="h-8 w-8" />
+                )}
+              </Button>
+
+              {/* End call */}
+              <Button
+                onClick={handleEndCall}
+                variant="destructive"
+                size="lg"
+                className="w-16 h-16 rounded-full p-0"
+              >
+                <PhoneOff className="h-7 w-7" />
+              </Button>
+            </div>
+            <p className="text-xs opacity-60 mt-2">
+              {isRecording ? 'Release to send' : isProcessing ? 'Processing...' : isPlaying ? 'Clara is speaking...' : 'Hold to talk'}
+            </p>
           </motion.div>
         )}
 
