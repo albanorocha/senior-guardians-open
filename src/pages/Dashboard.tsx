@@ -26,6 +26,7 @@ const Dashboard = () => {
   const [healthLogs, setHealthLogs] = useState<any[]>([]);
   const [adherencePercent, setAdherencePercent] = useState(0);
   const [streak, setStreak] = useState(0);
+  const [todayMedStatus, setTodayMedStatus] = useState<Record<string, boolean | null>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,6 +46,26 @@ const Dashboard = () => {
       setAlerts(alertsRes.data || []);
       setReminders(remindersRes.data || []);
       setHealthLogs(healthRes.data || []);
+
+      // Fetch today's medication status
+      const todayStart = startOfDay(new Date()).toISOString();
+      const { data: todayCheckIns } = await supabase
+        .from('check_ins')
+        .select('id')
+        .eq('user_id', user.id)
+        .gte('scheduled_at', todayStart);
+      if (todayCheckIns && todayCheckIns.length > 0) {
+        const todayCiIds = todayCheckIns.map(c => c.id);
+        const { data: todayResponses } = await supabase
+          .from('check_in_responses')
+          .select('medication_id, taken')
+          .in('check_in_id', todayCiIds);
+        const statusMap: Record<string, boolean | null> = {};
+        todayResponses?.forEach(r => {
+          statusMap[r.medication_id] = r.taken;
+        });
+        setTodayMedStatus(statusMap);
+      }
 
       // Calculate adherence from last 30 days
       const thirtyDaysAgo = subDays(new Date(), 30).toISOString();
@@ -287,7 +308,11 @@ const Dashboard = () => {
                         <p className="text-senior-base font-semibold">{med.name}</p>
                         <p className="text-senior-sm text-muted-foreground">{med.dosage} · {med.time_slots?.join(', ')}</p>
                       </div>
-                      <Circle className="h-5 w-5 text-muted-foreground" />
+                      {todayMedStatus[med.id] === true
+                        ? <CheckCircle className="h-5 w-5 text-green-500" />
+                        : todayMedStatus[med.id] === false
+                          ? <XCircle className="h-5 w-5 text-red-500" />
+                          : <Circle className="h-5 w-5 text-muted-foreground" />}
                     </div>
                   ))}
                 </div>
