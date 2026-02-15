@@ -46,6 +46,11 @@ const CheckIn = () => {
   const [prepStep, setPrepStep] = useState<'profile' | 'context' | 'connecting' | 'done'>('profile');
   const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
   const [isAgentTalking, setIsAgentTalking] = useState(false);
+  const [preparedVariables, setPreparedVariables] = useState<{
+    patientName: string;
+    patientAge: number | string | null;
+    medications: { name: string; dosage: string }[];
+  } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const atomsClientRef = useRef<AtomsClient | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -170,6 +175,12 @@ const CheckIn = () => {
         current_date: now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
         current_time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
       };
+
+      setPreparedVariables({
+        patientName: patientName,
+        patientAge: patientAge,
+        medications: medications.map(m => ({ name: m.name, dosage: m.dosage })),
+      });
 
       console.log('[CheckIn] Variables prepared:', JSON.stringify(variables));
 
@@ -373,6 +384,48 @@ const CheckIn = () => {
               <PrepStep label="Enviando dados" done={prepStep === 'connecting' || prepStep === 'done'} active={prepStep === 'context'} />
               <PrepStep label="Conectando com Clara" done={prepStep === 'done'} active={prepStep === 'connecting'} />
             </div>
+
+            {/* Patient data card */}
+            {preparedVariables && prepStep !== 'profile' && (
+              <div className="w-full max-w-xs mt-6 rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-4 space-y-3">
+                <h3 className="text-senior-sm font-semibold">Dados do paciente</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Nome</span>
+                    <span className="font-medium">{preparedVariables.patientName}</span>
+                  </div>
+                  {preparedVariables.patientAge && preparedVariables.patientAge !== 'unknown' && (
+                    <div className="flex justify-between">
+                      <span className="opacity-60">Idade</span>
+                      <span className="font-medium">{preparedVariables.patientAge} anos</span>
+                    </div>
+                  )}
+                  {preparedVariables.medications.length > 0 && (
+                    <div>
+                      <span className="opacity-60">Medicamentos</span>
+                      <ol className="mt-1 space-y-0.5 list-decimal list-inside">
+                        {preparedVariables.medications.map((med, i) => (
+                          <li key={i} className="text-xs">
+                            <span className="font-medium">{med.name}</span> — {med.dosage}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+                <div className="pt-2 border-t border-primary-foreground/20">
+                  {prepStep === 'context' ? (
+                    <span className="flex items-center gap-2 text-xs opacity-70">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Enviando para Clara...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2 text-xs text-green-300">
+                      <Check className="h-3 w-3" /> Clara tem acesso a estes dados
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 
