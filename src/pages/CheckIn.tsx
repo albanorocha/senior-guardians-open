@@ -295,20 +295,35 @@ const CheckIn = () => {
     if (!mediaRecorderRef.current || isProcessing || isPlaying) return;
 
     chunksRef.current = [];
-    const recorder = mediaRecorderRef.current;
+    
+    // Create a fresh recorder each time since stop() makes it inactive
+    const stream = mediaRecorderRef.current.stream;
+    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    mediaRecorderRef.current = recorder;
+    
+    const recordStartTime = Date.now();
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
 
     recorder.onstop = () => {
+      const duration = Date.now() - recordStartTime;
+      console.log('[CheckIn] Recording duration:', duration, 'ms, chunks:', chunksRef.current.length);
+      
+      if (duration < 500) {
+        toast({ title: 'Too short', description: 'Hold the button longer while speaking.', variant: 'destructive' });
+        return;
+      }
+      
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      if (blob.size > 0) {
+      console.log('[CheckIn] Audio blob size:', blob.size, 'bytes');
+      if (blob.size > 100) {
         sendAudioToVoiceChat(blob);
       }
     };
 
-    recorder.start();
+    recorder.start(250); // collect data every 250ms
     setIsRecording(true);
   };
 

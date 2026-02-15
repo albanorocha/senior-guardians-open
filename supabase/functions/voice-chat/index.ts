@@ -41,17 +41,14 @@ serve(async (req) => {
       const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
       console.log('[voice-chat] Audio bytes length:', audioBytes.length);
 
-      // Send as multipart form-data with a file — Pulse requires a proper audio file
-      const formData = new FormData();
-      const audioBlob = new Blob([audioBytes], { type: 'audio/webm' });
-      formData.append('file', audioBlob, 'recording.webm');
-
+      // Pulse API expects raw audio bytes with correct content-type
       const sttRes = await fetch('https://waves-api.smallest.ai/api/v1/pulse/get_text?model=pulse&language=en', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${SMALLEST_AI_API_KEY}`,
+          'Content-Type': 'audio/webm',
         },
-        body: formData,
+        body: audioBytes.buffer,
       });
 
       if (!sttRes.ok) {
