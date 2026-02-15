@@ -1,60 +1,61 @@
 
-# Fix: Medicamentos nao marcados como tomados no summary
 
-## Problema
+# Unificar o Prompt da Clara com o Sistema Atual
 
-A IA esta chamando as tools corretamente (os logs confirmam `report_medication_status` com `taken: true` para Tylenol e Desloratadina), mas os toggles de medicamento na tela de summary aparecem desmarcados. O mood e o summary da IA funcionam corretamente.
+## Objetivo
 
-## Causa raiz
+Substituir o system prompt simplificado atual pelo prompt completo e detalhado da Clara, e alinhar as ferramentas (tools) do LLM com as funcoes descritas no prompt.
 
-Duas causas identificadas:
+## O que muda
 
-1. **Stale closure com `medications`**: A funcao `handleVoiceResponse` usa `medications` do escopo do componente, mas e chamada de dentro de `sendAudioToVoiceChat`, que por sua vez e chamada de `recorder.onstop` -- um callback capturado durante `startVADRecording`. Assim como ja foi corrigido para `conversationHistory` (usando ref), `medications` tambem precisa de um ref para garantir que o array atualizado esteja disponivel no momento do matching.
+### 1. System Prompt (`supabase/functions/voice-chat/index.ts`)
 
-2. **`handleEndCall` sobrescreve o summary da IA**: Na linha 234, `setSummary(transcriptText)` sempre substitui qualquer summary pre-preenchido pela tool `generate_summary`. Deveria ser condicional (so preencher se nao houver summary da IA).
+O prompt atual tem ~20 linhas genericas. Sera substituido pelo prompt completo que define:
+- Personalidade e tom da Clara (paciente, calorosa, feminina)
+- Regras de formatacao (sem markdown, numeros digito a digito, horarios por extenso)
+- Fluxo conversacional completo (abertura, checagem de medicamentos um a um, efeitos colaterais, wellness check, encerramento)
+- Protocolo de emergencia
+- Guardrails de seguranca (nunca diagnosticar, nunca mudar medicamentos)
+- Logica de reforco positivo e tracking de aderencia
 
-## Solucao
+O prompt sera parametrizado com as variaveis dinamicas ja existentes: `patientName`, `patientAge`, `medicationList`, data/hora atual.
 
-### Arquivo: `src/pages/CheckIn.tsx`
+### 2. Ferramentas (Tools) - Expandir para cobrir o prompt completo
 
-**Correcao 1 -- Adicionar `medicationsRef`**:
-Criar um ref sincronizado com o state `medications`, igual ao padrao ja usado para `conversationHistoryRef`:
+Ferramentas atuais (mantidas e ajustadas):
+- **report_medication_status** - mantida como esta
+- **report_mood** - mantida como esta
+- **generate_summary** - mantida como esta
+- **end_conversation** - renomeada para `end_call` para alinhar com o prompt
 
-```typescript
-const medicationsRef = useRef(medications);
-useEffect(() => { medicationsRef.current = medications; }, [medications]);
-```
+Novas ferramentas adicionadas:
+- **send_alert** - Para emergencias (dor no peito, queda, ideacao suicida). No momento, loga no servidor e inclui nos extractedData para o frontend exibir alerta visual
+- **send_alert_to_caregiver** - Para alertas nao-urgentes (medicamento nao tomado, padrao de nao-aderencia). Similar ao anterior, com severidade menor
+- **log_health_data** - Registra dados de saude mencionados (sono, alimentacao, sintomas). Incluido nos extractedData para referencia
+- **schedule_reminder** - Para quando Clara sugere ligar de volta mais tarde. Por agora, apenas loga a intencao nos extractedData
 
-Usar `medicationsRef.current` dentro de `handleVoiceResponse` no lugar de `medications` para o matching de medicamentos.
+### 3. Frontend (`src/pages/CheckIn.tsx`)
 
-**Correcao 2 -- `handleEndCall` nao sobrescrever summary da IA**:
-Mudar a logica de pre-preenchimento do summary para so usar o transcript como fallback:
+Atualizar `handleVoiceResponse` para processar as novas ferramentas:
+- **send_alert**: Exibir toast de alerta vermelho/urgente
+- **send_alert_to_caregiver**: Exibir toast informativo
+- **log_health_data**: Silencioso (apenas logging no console)
+- **schedule_reminder**: Toast informativo ("Clara vai ligar novamente as X")
+- **end_call**: Renomear de `end_conversation` para `end_call`
 
-```typescript
-// Antes:
-if (transcripts.length > 0) {
-  setSummary(transcriptText);
-}
+### 4. Detalhes do System Prompt
 
-// Depois:
-if (!summary && transcripts.length > 0) {
-  setSummary(transcriptText);
-}
-```
+O prompt completo sera inserido como template string, com as seguintes variaveis interpoladas:
+- `${patientContext?.patientName || 'Patient'}` 
+- `${patientContext?.patientAge || 'unknown'}`
+- `${medicationList}` (lista formatada dos medicamentos)
+- `${new Date().toLocaleDateString()}` para current_date
+- `${new Date().toLocaleTimeString()}` para current_time
 
-Isso usa a forma funcional ou uma ref para checar se ja existe um summary gerado pela IA.
+O prompt sera longo (~4000 tokens), mas isso e necessario para guiar corretamente o comportamento da Clara. As secoes de fluxo conversacional, protocolo de emergencia e guardrails serao incluidas integralmente.
 
-**Correcao 3 -- Matching de medicamento bidirecional**:
-Melhorar a logica de `find` para tambem verificar se o nome do medicamento contem o nome reportado pela IA, e vice-versa:
+## Arquivos modificados
 
-```typescript
-const med = medicationsRef.current.find(m => {
-  const dbName = m.name.toLowerCase();
-  const aiName = (item.args.medication_name || '').toLowerCase();
-  return dbName.includes(aiName) || aiName.includes(dbName);
-});
-```
+1. **`supabase/functions/voice-chat/index.ts`** - Prompt completo, novas tools, renomear end_conversation para end_call
+2. **`src/pages/CheckIn.tsx`** - Processar novas tools no handleVoiceResponse, renomear end_conversation para end_call
 
-### Arquivos modificados
-
-1. `src/pages/CheckIn.tsx` -- medicationsRef, summary fallback, matching bidirecional
