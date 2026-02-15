@@ -1,40 +1,22 @@
 
 
-# Alertas em tempo real durante a chamada + estilo reforçado no Dashboard e History
+# Ajustar uso do nome do paciente pela Clara
 
-## 1. Reduzir timeout de silêncio para 1 segundo
+## Mudanca
 
-**Arquivo:** `src/pages/CheckIn.tsx`, linha 34
-- `SILENCE_TIMEOUT_MS`: 2000 -> 1000
+**Arquivo:** `supabase/functions/voice-chat/index.ts`, linha 221
 
-## 2. Cards de alerta durante a chamada ativa (CheckIn)
+Trocar a instrucao atual:
+> "Always address the patient by their first name in every response. Use their name naturally to make them feel recognized and cared for."
 
-Atualmente, os alertas só aparecem na tela de resumo (summary). A mudança adiciona um banner de alertas **durante a chamada ativa**, logo acima do chat, que aparece em tempo real quando a Clara dispara um alerta.
+Por:
+> "Use the patient's first name only at the beginning of the conversation (greeting) and occasionally when it feels natural -- for example, to comfort or emphasize something. Do NOT repeat their name in every single response; it sounds robotic."
 
-**Arquivo:** `src/pages/CheckIn.tsx`
-- No bloco `callState === 'active'` (entre o timer e o chat panel, por volta da linha 780), inserir um bloco que renderiza `callAlerts` em tempo real:
-  - Alerta de emergência: card com borda vermelha, fundo vermelho translúcido, ícone vermelho
-  - Notificação ao cuidador: card com borda azul, fundo azul translúcido, ícone azul
-  - Animação de entrada com framer-motion para cada novo alerta
+Isso torna a conversa mais natural e menos repetitiva, mantendo o toque pessoal nos momentos certos.
 
-## 3. Reforçar alertas no Dashboard
+## Arquivo alterado
 
-**Arquivo:** `src/pages/Dashboard.tsx`, linhas 152-173
-- Adicionar tratamento para `type === 'caregiver'`: borda azul, fundo azul claro, ícone azul (atualmente só tem emergency=vermelho e warning=amarelo)
-- Texto adicional para caregiver: "Caregiver was notified"
-
-## 4. Reforçar alertas no History
-
-**Arquivo:** `src/pages/History.tsx`, linhas 148-158
-- Mesmo padrão: adicionar estilo diferenciado para alertas do tipo `caregiver`
-- Borda azul e fundo azul claro para alertas de notificação ao cuidador
-- Manter vermelho para emergências e amarelo para warnings
-
-## Resumo dos arquivos alterados
-
-| Arquivo | Mudança |
+| Arquivo | Mudanca |
 |---------|---------|
-| `src/pages/CheckIn.tsx` | SILENCE_TIMEOUT_MS -> 1000; banner de alertas durante chamada ativa |
-| `src/pages/Dashboard.tsx` | Estilo diferenciado para alertas caregiver (azul) |
-| `src/pages/History.tsx` | Estilo diferenciado para alertas caregiver (azul) |
+| `supabase/functions/voice-chat/index.ts` | Instrucao sobre uso do nome: apenas no inicio e quando fizer sentido |
 
