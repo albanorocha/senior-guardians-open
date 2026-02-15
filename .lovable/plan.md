@@ -1,97 +1,49 @@
 
 
-# Rebuild Call Feature: Fix State Reset, Audio Playback, and VAD
+# Remove Debug Page, Atoms References, and Fix Stuck "Connecting" Screen
 
-## Problems Identified
+## Overview
 
-1. **Call doesn't reload after ending** -- After ending a call, there's no way to return to the "incoming" state without a page refresh. The state (streams, audio context, refs) from the previous call aren't cleaned up properly.
+The "Connecting..." screen gets stuck because `handleAnswer` errors out silently before reaching the `active` state. The fix is to remove the intermediate `preparing` state entirely -- go straight from `incoming` to `active`, and handle errors gracefully. Additionally, the Debug page and all atoms-related code will be removed.
 
-2. **Clara's audio not playing** -- The session replay shows the call gets stuck at "Connecting..." and never reaches the active state. The `handleAnswer` function likely fails silently because the initial `sendToVoiceChat` call happens before state is fully committed (React batches state updates), so `conversationHistory` is stale when building the request.
+## Changes
 
-3. **VAD not sending audio** -- Since the call never fully initializes (stuck at "Connecting"), the VAD monitoring never starts. Additionally, the `AudioVisualizer` function component wrapped in `AnimatePresence` causes React ref warnings that may interfere with rendering.
+### 1. Delete `src/pages/Debug.tsx`
+Remove the entire file -- it only contains atoms-related diagnostic tests.
 
-## Changes to `src/pages/CheckIn.tsx`
+### 2. Remove Debug route from `src/App.tsx`
+- Remove the `import Debug` line
+- Remove the `<Route path="/debug" ...>` line
 
-### 1. Full state reset function
-Create a `resetCallState()` function that clears all refs (stream, audioContext, mediaRecorder, VAD interval) and resets all state variables. Call this:
-- In `handleEndCall` before transitioning to summary
-- When starting a new call from the summary screen
+### 3. Remove "preparing" state from `src/pages/CheckIn.tsx`
 
-### 2. Add "Call Again" button in summary
-Add a button in the summary screen that calls `resetCallState()` and sets `callState` back to `'incoming'`.
+**Remove the `preparing` CallState:**
+- Change the type from `'incoming' | 'preparing' | 'active' | 'summary'` to `'incoming' | 'active' | 'summary'`
+- Delete the entire "PREPARING" UI block (lines 583-598)
 
-### 3. Fix initial greeting race condition
-The `sendToVoiceChat` function uses `conversationHistory` state, but when called inside `handleAnswer`, the state hasn't been committed yet (React batches). Fix by passing the history explicitly to `sendToVoiceChat` instead of reading from state:
-- Add an optional `historyOverride` parameter to `sendToVoiceChat`
-- Pass `[]` as the history override when calling from `handleAnswer`
+**Simplify `handleAnswer`:**
+- Remove `setCallState('preparing')` at the start
+- Keep all the setup logic (fetch profile, unlock audio, get mic, create AudioContext)
+- Only set `setCallState('active')` at the end on success
+- On error, stay on `incoming` (already handled) and show the toast
 
-### 4. Fix AudioVisualizer ref warning
-The `AudioVisualizer` is a function component rendered inside `AnimatePresence` which tries to pass a ref to it. Fix by either:
-- Moving `AudioVisualizer` outside the `AnimatePresence` scope, or
-- Converting it to use `React.forwardRef`, or
-- Simply rendering it without motion wrapper (simplest approach -- just remove it from inside a motion div that AnimatePresence controls)
+This way, the user stays on the "incoming" screen while setup happens (the green button can show a loading spinner), and transitions directly to the active call once everything is ready.
 
-### 5. Improve audio playback reliability
-- Add a small delay (50ms) after setting `audio.src` before calling `play()` to ensure the browser has loaded the blob URL
-- Add more detailed error logging in `playAudio` to diagnose failures
+**Add loading state to the answer button:**
+- Add a `connecting` boolean state
+- Set it `true` when `handleAnswer` starts, `false` when done (success or error)
+- Show a `Loader2` spinner on the green answer button while connecting
+- Disable the button while connecting
 
-### 6. Ensure VAD resumes after Clara speaks
-After `isPlaying` transitions from `true` to `false`, explicitly set `micStatus` back to `'listening'`. Currently the VAD loop handles this, but there's a timing gap where `isProcessing` might still be `true` when `isPlaying` goes `false`.
+### 4. Remove any atoms references from `src/components/AppNav.tsx` (if any)
+Check if there's a link to `/debug` in the navigation and remove it.
 
-## Technical Details
+## Technical Summary
 
-**State reset function:**
-```typescript
-const resetCallState = () => {
-  clearInterval(timerRef.current);
-  clearInterval(vadIntervalRef.current);
-  if (mediaRecorderRef.current?.state !== 'inactive') {
-    mediaRecorderRef.current?.stop();
-  }
-  streamRef.current?.getTracks().forEach(t => t.stop());
-  audioContextRef.current?.close();
-  
-  mediaRecorderRef.current = null;
-  streamRef.current = null;
-  audioContextRef.current = null;
-  analyserRef.current = null;
-  audioRef.current = null;
-  isRecordingRef.current = false;
-  isSpeakingRef.current = false;
-  silenceStartRef.current = null;
-  
-  setElapsed(0);
-  setCallStart(null);
-  setTranscripts([]);
-  setConversationHistory([]);
-  setIsProcessing(false);
-  setIsPlaying(false);
-  setMicStatus('listening');
-  setTextInput('');
-};
-```
-
-**Fix sendToVoiceChat history race:**
-```typescript
-const sendToVoiceChat = async (
-  text: string, 
-  ctx?: typeof patientContext, 
-  historyOverride?: typeof conversationHistory
-) => {
-  const history = historyOverride ?? conversationHistory;
-  const updatedHistory = [...history, { role: 'user' as const, content: text }];
-  setConversationHistory(updatedHistory);
-  // ... use updatedHistory in fetch body
-};
-
-// In handleAnswer:
-await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx, []);
-```
-
-**Summary screen "Call Again" button:**
-```typescript
-<Button onClick={() => { resetCallState(); setCallState('incoming'); }}>
-  New Call
-</Button>
-```
+| File | Action |
+|------|--------|
+| `src/pages/Debug.tsx` | Delete |
+| `src/App.tsx` | Remove Debug import and route |
+| `src/pages/CheckIn.tsx` | Remove `preparing` state, add loading spinner to answer button |
+| `src/components/AppNav.tsx` | Remove `/debug` link if present |
 
