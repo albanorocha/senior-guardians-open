@@ -34,26 +34,8 @@ serve(async (req) => {
       });
     }
 
-    // Save variables to pre_call_context table so atoms-precall can serve them
-    if (variables && userId) {
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-      const supabase = createClient(supabaseUrl, serviceRoleKey);
-      
-      // Delete old context for this user, then insert new one
-      await supabase.from('pre_call_context').delete().eq('user_id', userId);
-      const { error: insertError } = await supabase.from('pre_call_context').insert({
-        user_id: userId,
-        variables,
-      });
-      if (insertError) {
-        console.error('[atoms-session] Error saving pre_call_context:', insertError.message);
-      } else {
-        console.log('[atoms-session] Saved pre_call_context for user:', userId);
-      }
-    }
-
     // Create webcall (variables not supported in webcall endpoint)
+    // Context is now saved separately via atoms-save-context
     const webcallBody = JSON.stringify({ agentId });
     console.log('[atoms-session] Creating webcall - URL: https://atoms-api.smallest.ai/api/v1/conversation/webcall');
     console.log('[atoms-session] Creating webcall - body:', webcallBody);

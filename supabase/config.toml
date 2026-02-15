@@ -2,3 +2,6 @@ project_id = "rlbratdaqtdpbifkceds"
 
 [functions.atoms-precall]
 verify_jwt = false
+
+[functions.atoms-save-context]
+verify_jwt = false
