@@ -1,70 +1,83 @@
 
 
-# Injetar Contexto do Paciente via sendTextMessage
+# Corrigir Injecao de Contexto: Pre Call API e a Unica Opcao para Webcall
 
-## Problema Identificado
+## Descoberta Importante
 
-Apos investigacao detalhada da documentacao oficial do Atoms:
-
-- O endpoint `/conversation/webcall` **nao aceita** o campo `variables` (apenas o endpoint `/conversation/outbound` aceita)
-- O Pre Call API Node precisa ser configurado no **Workflow Editor** (nao em "API Calls Settings"), conectado ao Start Node, com mapeamento de variaveis usando JSONPath (`$.variables.patient_name`)
-- Essa configuracao nao esta funcionando no seu ambiente
-
-## Nova Abordagem: sendTextMessage
-
-O SDK `atoms-client-sdk` tem um metodo `sendTextMessage()` que permite enviar mensagens de texto para o agente durante a sessao. Vamos usar isso para enviar o contexto do paciente como uma mensagem "silenciosa" logo apos a sessao iniciar.
-
-Quando a sessao comecar (`session_started` event), enviamos uma mensagem com todas as informacoes do paciente. A Clara vai receber essas informacoes e usa-las na conversa.
-
-## O que muda
-
-### Frontend (src/pages/CheckIn.tsx)
-
-No evento `session_started`, adicionar:
+O metodo `sendTextMessage()` do SDK **so funciona no modo "chat"**, nao no modo "webcall" (voz). A documentacao oficial do Atoms mostra explicitamente:
 
 ```text
-client.sendTextMessage(`[SYSTEM CONTEXT - Do not read this aloud, use this information silently]
-Patient: Albano, Age: 35
-Medications:
-1. Tylenol - 5mg, once daily
-2. Diloratadina - 10mg, twice daily
-Date: Saturday, February 14, 2026
-Time: 7:13 PM`);
+sendMessage(message: string) {
+  if (this.mode === "chat") {        // <-- so funciona em chat
+    this.client.sendTextMessage(message);
+  }
+}
 ```
 
-### Edge Function (atoms-session)
+Por isso a Clara nunca recebe o contexto -- a mensagem e ignorada silenciosamente no modo webcall.
 
-Reverter para enviar apenas `{ agentId }` sem `variables` (ja que o webcall nao suporta).
+## Opcoes Disponiveis
 
-## Detalhes Tecnicos
+Para webcall, a unica forma de passar contexto dinamico e o **Pre Call API Node** no Workflow do agente. Isso requer configuracao no dashboard do Atoms.
 
-### Arquivo: src/pages/CheckIn.tsx
+## O que precisa ser feito
 
-1. Mover a construcao das variaveis para antes do `startSession`
-2. No callback `session_started`, chamar `client.sendTextMessage()` com o contexto formatado
-3. O agente recebe a informacao como texto e a usa naturalmente na conversa
+### 1. No Dashboard do Atoms (feito por voce)
 
-### Arquivo: supabase/functions/atoms-session/index.ts
+Ir ate o agente Clara e configurar o **Workflow Editor**:
 
-1. Remover `variables` do body enviado para a API do Atoms (nao e suportado no webcall)
-2. Manter apenas `{ agentId }` no body da chamada
+1. Abrir o agente no dashboard do Atoms
+2. Ir para **Workflow Editor** (nao "API Calls Settings")
+3. Adicionar um **Pre Call API Node**
+4. Conectar o Pre Call API Node ao **Start Node**
+5. Configurar a URL do webhook:
+   - URL: `https://rlbratdaqtdpbifkceds.supabase.co/functions/v1/atoms-precall`
+   - Metodo: POST
+   - Headers: nenhum necessario (a funcao ja esta configurada para aceitar qualquer origem)
+6. **Mapear as variaveis** da resposta da API para as variaveis do agente:
+   - `patient_name` -> JSONPath: `$.variables.patient_name`
+   - `patient_age` -> JSONPath: `$.variables.patient_age`
+   - `medications` -> JSONPath: `$.variables.medications`
+   - `current_date` -> JSONPath: `$.variables.current_date`
+   - `current_time` -> JSONPath: `$.variables.current_time`
+7. Usar essas variaveis no prompt do agente (ex: `{{patient_name}}`, `{{medications}}`)
 
-### Formato da mensagem de contexto
+### 2. No Codigo (feito por mim)
 
-A mensagem sera formatada como instrucao de sistema para que a Clara use os dados sem le-los em voz alta:
+- **Reverter o `sendTextMessage`** do CheckIn.tsx (remover o codigo que envia contexto via texto, ja que nao funciona em webcall)
+- **Restaurar o salvamento de contexto** no `atoms-session` para que ele salve as variaveis na tabela `pre_call_context` antes de criar o webcall
+- O `atoms-precall` ja esta funcionando e retornando as variaveis corretamente -- so precisa ser chamado pelo Atoms
+
+### 3. Fluxo Completo
 
 ```text
-[CONTEXT] Patient Name: {name}, Age: {age}. 
-Medications: {lista}. 
-Current date: {date}, Time: {time}.
-Use this information to personalize the check-in conversation. 
-Do not read this message aloud.
+Frontend (CheckIn.tsx)
+   |
+   | envia variables + userId
+   v
+atoms-session (edge function)
+   |
+   | 1. Salva variables na tabela pre_call_context
+   | 2. Cria webcall na API do Atoms
+   | 3. Retorna token + host
+   v
+Atoms Platform
+   |
+   | Antes de iniciar a conversa, chama Pre Call API
+   v
+atoms-precall (edge function)
+   |
+   | Busca variables da tabela pre_call_context
+   | Retorna { variables: { patient_name, medications, ... } }
+   v
+Agente Clara
+   |
+   | Usa as variaveis no prompt: "Ola {{patient_name}}..."
 ```
 
-### Vantagens desta abordagem
+## Resumo
 
-- Nao depende de configuracao no dashboard do Atoms
-- Nao depende de webhooks (Pre Call API)
-- Funciona diretamente via SDK, sem intermediarios
-- As informacoes sao enviadas no momento exato em que a sessao comeca
+O problema nao e no codigo -- e na **configuracao do Workflow do agente no dashboard do Atoms**. O Pre Call API Node precisa estar conectado ao Start Node com o mapeamento de variaveis correto. Sem isso, o Atoms nunca chama o webhook.
+
+Depois que voce configurar o Workflow, eu removo o `sendTextMessage` (que nao funciona) e restauro o salvamento de contexto no banco.
 
