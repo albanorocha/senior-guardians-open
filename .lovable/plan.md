@@ -1,103 +1,40 @@
 
 
-# Reestruturar o Fluxo do Check-In: Enviar Dados Antes da Ligacao
+# Exibir Transcrição da Conversa Durante a Ligação
 
-## Problema Atual
+## O que será feito
 
-O fluxo atual faz tudo em um unico passo dentro do `handleAnswer`:
-1. Clica em "Atender"
-2. Muda para estado "active" imediatamente
-3. Busca perfil do paciente
-4. Busca medicamentos
-5. Chama `atoms-session` (que salva dados E cria a webcall ao mesmo tempo)
-6. Inicia a sessao de voz
+Adicionar um painel de transcrição em tempo real na tela de chamada ativa, mostrando o que a Clara (agente) está dizendo durante a ligação. O SDK do Atoms já possui um evento `transcript` que envia o texto em tempo real.
 
-O problema: como tudo acontece junto, existe uma corrida entre salvar os dados e o Atoms chamar o webhook `atoms-precall`. Se o Atoms chamar o webhook antes dos dados serem salvos, o agente Clara nao recebe as informacoes do paciente.
+## Como vai funcionar
 
-## Solucao: Fluxo em Duas Etapas
+- Durante a chamada ativa, um painel de chat aparecerá abaixo do avatar da Clara
+- Cada mensagem da Clara aparecerá como uma bolha de texto com timestamp
+- O painel fará scroll automático para a mensagem mais recente
+- O painel será discreto e não atrapalhará o botão de encerrar chamada
 
-Separar o processo em duas fases claras:
+## Mudanças técnicas
 
-**Fase 1 - Preparar Dados** (novo estado "preparing"):
-- Ao clicar em "Atender", mostra tela de "Preparando..."
-- Busca perfil e medicamentos
-- Salva os dados no `pre_call_context` via uma chamada dedicada
-- Confirma que os dados foram salvos com sucesso
+### Arquivo: `src/pages/CheckIn.tsx`
 
-**Fase 2 - Estabelecer Ligacao** (so apos Fase 1 completar):
-- Cria a webcall via `atoms-session`
-- Inicia a sessao de voz
-- Muda para estado "active"
+1. **Novo estado para transcrições**
+   - Adicionar `transcripts` como array de `{ text, timestamp, sender }` no state
+   - Adicionar estado `isAgentTalking` para feedback visual
 
-## Mudancas Necessarias
+2. **Escutar eventos do SDK**
+   - Após `client.startSession()`, registrar listener para o evento `transcript` que captura `{ text, timestamp }`
+   - Registrar listeners para `agent_start_talking` e `agent_stop_talking` para indicador visual
+   - Cada transcript recebido será adicionado ao array de mensagens
 
-### 1. Edge Function `atoms-session` - Separar responsabilidades
+3. **UI da transcrição na tela "active"**
+   - Abaixo do timer e acima do botão de encerrar, adicionar um `ScrollArea` com as mensagens
+   - Cada mensagem exibida como bolha com o texto e horário
+   - Indicador visual quando a Clara está falando (animação no avatar ou label "Falando...")
+   - Auto-scroll para a última mensagem
 
-Criar uma nova rota ou modificar `atoms-session` para aceitar dois modos:
-- **Modo 1 - Salvar contexto**: recebe `variables` e `userId`, salva no `pre_call_context`, retorna confirmacao
-- **Modo 2 - Criar webcall**: recebe `agentId`, cria a sessao no Atoms, retorna token
+4. **Passar transcrições para o resumo**
+   - Quando a chamada terminar, o campo "summary" será pré-preenchido com a transcrição completa da conversa, facilitando o salvamento
 
-Na pratica, o mais simples e criar uma nova edge function `atoms-save-context` dedicada a salvar os dados, e manter `atoms-session` apenas para criar a webcall.
-
-### 2. Nova Edge Function `atoms-save-context`
-
-Arquivo: `supabase/functions/atoms-save-context/index.ts`
-- Recebe `{ variables, userId }`
-- Deleta registros antigos do `pre_call_context`
-- Insere novo registro
-- Retorna `{ success: true }` com confirmacao
-
-### 3. Simplificar `atoms-session`
-
-Arquivo: `supabase/functions/atoms-session/index.ts`
-- Remover a logica de salvar no `pre_call_context` (agora feita pela nova funcao)
-- Manter apenas a criacao da webcall no Atoms API
-
-### 4. Reestruturar `CheckIn.tsx`
-
-Arquivo: `src/pages/CheckIn.tsx`
-
-- Adicionar novo estado `preparing` ao `CallState`: `'incoming' | 'preparing' | 'active' | 'summary'`
-- Nova tela visual para o estado "preparing" mostrando progresso (ex: "Preparando seus dados...", "Dados enviados!", "Conectando com Clara...")
-- O fluxo do `handleAnswer` passa a ser:
-
-```
-1. setCallState('preparing')
-2. Buscar perfil e medicamentos
-3. Chamar atoms-save-context → salvar dados
-4. Aguardar confirmacao de sucesso
-5. Chamar atoms-session → criar webcall
-6. Iniciar sessao de voz
-7. setCallState('active')
-```
-
-- Se qualquer etapa falhar, volta para `incoming` com mensagem de erro
-
-### 5. Configuracao do config.toml
-
-Adicionar entrada para a nova edge function com `verify_jwt = false` (necessario pois o Atoms chama sem JWT):
-
-```toml
-[functions.atoms-save-context]
-verify_jwt = false
-```
-
-## Tela de "Preparando" (Estado preparing)
-
-Visual similar ao estado "incoming" mas com:
-- Icone de Clara com animacao de carregamento
-- Texto "Preparando seus dados..."
-- Indicadores de progresso para cada etapa:
-  - "Carregando perfil..." → checkmark
-  - "Enviando medicamentos..." → checkmark
-  - "Conectando com Clara..." → animacao
-
-## Resultado Esperado
-
-Quando o usuario clicar em "Atender":
-1. Ve uma tela de preparacao com progresso
-2. Dados do paciente sao salvos no banco PRIMEIRO
-3. So depois a ligacao e criada
-4. Quando o Atoms chamar o webhook `atoms-precall`, os dados ja estarao disponiveis
-5. Clara recebe nome, idade e medicamentos corretamente
+### Nenhuma mudança no backend
+Todas as mudanças são apenas no frontend, usando eventos já disponíveis no SDK.
 
