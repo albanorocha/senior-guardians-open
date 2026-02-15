@@ -1,76 +1,171 @@
 
 
-# Corrigir envio de audio e transcrição vazia no Check-In
+# Conectar IA ao sistema + Auto-finalizar chamada
 
-## Problema Identificado
+## O que muda para o usuario
 
-Os logs da edge function mostram que o audio chega ao servidor (39-68KB), mas o Pulse STT retorna transcrição vazia repetidamente. Existem dois problemas:
+Durante a conversa com a Clara, ela vai automaticamente:
+- Marcar medicamentos como tomados ou nao tomados
+- Registrar efeitos colaterais mencionados
+- Detectar o humor do paciente
+- Gerar um resumo da conversa
+- **Finalizar a chamada automaticamente** quando entender que o check-in esta completo
 
-1. **Content-Type incorreto no STT**: O audio e gravado como `audio/webm;codecs=opus` pelo MediaRecorder, mas o edge function envia ao Pulse com `Content-Type: audio/webm`. O Pulse pode nao estar decodificando corretamente o container webm. A solução e enviar o Content-Type correto (`audio/webm;codecs=opus`) ou, melhor ainda, enviar o blob diretamente como `application/octet-stream` com o formato especificado como query parameter.
-
-2. **Stale closure no `conversationHistory`**: Em `sendAudioToVoiceChat` (linha 465), `conversationHistory` captura o valor do estado no momento da criação do callback, não o valor atual. Isso pode causar contexto de conversa desatualizado.
-
-## Solução
-
-### 1. Melhorar compatibilidade do audio com Pulse STT
-
-No edge function `voice-chat/index.ts`:
-- Mudar o Content-Type para `application/octet-stream` que e mais universalmente aceito
-- Adicionar query parameter `content_type=audio/webm` para informar o Pulse do formato real
-- Alternativa: testar com `audio/webm;codecs=opus` como Content-Type
-
-### 2. Corrigir stale closure
-
-Em `sendAudioToVoiceChat` no `CheckIn.tsx`:
-- Usar um ref para `conversationHistory` para sempre ter o valor mais recente
-- Ou usar a forma funcional do setState para ler o valor atual
-
-### 3. Aumentar robustez do VAD
-
-- Reduzir `SILENCE_THRESHOLD` de 30 para 20 para capturar vozes mais baixas
-- Aumentar `MIN_RECORDING_DURATION_MS` de 800 para 1000 para garantir capturas mais substanciais
-
----
+Tudo isso aparece pre-preenchido na tela de resumo. Pequenos toasts discretos aparecem durante a chamada confirmando o que foi registrado.
 
 ## Detalhes Tecnicos
 
 ### Arquivo: `supabase/functions/voice-chat/index.ts`
 
-Alterar o envio ao Pulse STT para usar Content-Type mais preciso:
+Adicionar **tool calling** ao LLM com 4 ferramentas:
 
 ```typescript
-const sttRes = await fetch('https://waves-api.smallest.ai/api/v1/pulse/get_text?model=pulse&language=en', {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${SMALLEST_AI_API_KEY}`,
-    'Content-Type': 'audio/webm;codecs=opus',
+const tools = [
+  {
+    type: "function",
+    function: {
+      name: "report_medication_status",
+      description: "Report whether patient took a medication and any side effects",
+      parameters: {
+        type: "object",
+        properties: {
+          medication_name: { type: "string" },
+          taken: { type: "boolean" },
+          side_effects: { type: "string" }
+        },
+        required: ["medication_name", "taken"]
+      }
+    }
   },
-  body: audioBytes.buffer,
-});
+  {
+    type: "function",
+    function: {
+      name: "report_mood",
+      description: "Report detected patient mood",
+      parameters: {
+        type: "object",
+        properties: {
+          mood: { type: "string", enum: ["happy", "neutral", "confused", "distressed"] },
+          details: { type: "string" }
+        },
+        required: ["mood"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_summary",
+      description: "Generate a brief check-in summary when conversation is wrapping up",
+      parameters: {
+        type: "object",
+        properties: {
+          summary: { type: "string" },
+          overall_status: { type: "string", enum: ["good", "concerning", "needs_attention"] }
+        },
+        required: ["summary"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "end_conversation",
+      description: "End the check-in call when all topics have been covered and the patient has said goodbye",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: { type: "string" }
+        },
+        required: ["reason"]
+      }
+    }
+  }
+];
+```
+
+Atualizar o system prompt para instruir a Clara a:
+- Chamar `report_medication_status` quando o paciente confirmar/negar ter tomado um medicamento
+- Chamar `report_mood` quando detectar o estado emocional
+- Chamar `generate_summary` quando a conversa estiver terminando
+- Chamar `end_conversation` apos a despedida final (depois de ter coberto medicamentos e humor)
+
+Processar tool calls do LLM: quando o modelo retornar `tool_calls`, extrair os dados, fazer uma segunda chamada ao LLM com os resultados das tools para obter a resposta de texto, e incluir `extractedData` no JSON de resposta.
+
+```text
+Fluxo:
+  LLM resposta com tool_calls
+      |
+      v
+  Extrair dados de cada tool call
+      |
+      v
+  Segunda chamada ao LLM com tool results
+      |
+      v
+  Retornar: { agentText, audioBase64, extractedData: [...] }
 ```
 
 ### Arquivo: `src/pages/CheckIn.tsx`
 
-**Correcao 1 — Ref para conversationHistory**:
-Adicionar um `conversationHistoryRef` que se mantém sincronizado com o state, e usar o ref dentro de `sendAudioToVoiceChat`:
+Modificar `handleVoiceResponse` para processar `extractedData`:
+
+- **report_medication_status**: Encontrar medicamento pelo nome (match parcial, case-insensitive) e atualizar `responses` state (toggle taken, preencher issues)
+- **report_mood**: Atualizar state `mood`
+- **generate_summary**: Preencher campo `summary`
+- **end_conversation**: Chamar `handleEndCall()` automaticamente apos a Clara falar sua mensagem de despedida (aguardar o audio terminar de tocar)
+
+Para cada acao, mostrar um toast discreto (ex: "Losartan marcado como tomado", "Humor: Happy").
+
+Para o `end_conversation`, adicionar logica no `playAudio` / `onended` que verifica se ha um flag `shouldEndCall` e chama `handleEndCall()` quando o audio de despedida terminar de tocar.
 
 ```typescript
-const conversationHistoryRef = useRef(conversationHistory);
-useEffect(() => { conversationHistoryRef.current = conversationHistory; }, [conversationHistory]);
+// Novo ref para controlar auto-end
+const shouldEndCallRef = useRef(false);
+
+// Em handleVoiceResponse:
+if (data.extractedData) {
+  for (const item of data.extractedData) {
+    if (item.tool === 'report_medication_status') {
+      // match medication by name
+      const med = medications.find(m => 
+        m.name.toLowerCase().includes(item.args.medication_name.toLowerCase())
+      );
+      if (med) {
+        setResponses(r => ({
+          ...r,
+          [med.id]: { taken: item.args.taken, issues: item.args.side_effects || '' }
+        }));
+        toast({ title: `${med.name}: ${item.args.taken ? 'Taken' : 'Not taken'}` });
+      }
+    }
+    if (item.tool === 'report_mood') {
+      setMood(item.args.mood);
+      toast({ title: `Mood detected: ${item.args.mood}` });
+    }
+    if (item.tool === 'generate_summary') {
+      setSummary(item.args.summary);
+    }
+    if (item.tool === 'end_conversation') {
+      shouldEndCallRef.current = true;
+      // handleEndCall sera chamado quando o audio terminar
+    }
+  }
+}
+
+// Em playAudio, no onended:
+audio.onended = () => {
+  setIsPlaying(false);
+  URL.revokeObjectURL(url);
+  if (shouldEndCallRef.current) {
+    shouldEndCallRef.current = false;
+    handleEndCall();
+  }
+};
 ```
 
-Depois em `sendAudioToVoiceChat`:
-```typescript
-body: JSON.stringify({
-  audioBase64,
-  history: conversationHistoryRef.current, // usar ref em vez de state
-  patientContext,
-}),
-```
+### Resumo dos arquivos modificados
 
-**Correcao 2 — Ajuste VAD**:
-```typescript
-const SILENCE_THRESHOLD = 20;      // era 30
-const MIN_RECORDING_DURATION_MS = 1000; // era 800
-```
+1. **`supabase/functions/voice-chat/index.ts`** -- Tools definition, tool call processing, second LLM round-trip, updated system prompt, `extractedData` in response
+2. **`src/pages/CheckIn.tsx`** -- Process `extractedData`, auto-update medications/mood/summary states, auto-end call via `shouldEndCallRef`, toast feedback
 
