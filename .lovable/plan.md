@@ -1,43 +1,38 @@
 
+# Melhorias Visuais e Sonoras no Check-In
 
-# Corrigir TTS: Usar `output_format: "mp3"` em vez de PCM
+## 1. Som de toque na tela de chamada recebida
 
-## Problema Identificado
+Adicionar um som de toque de celular que toca em loop enquanto a tela "incoming" estiver ativa. Usar a Web Audio API para gerar um tom de toque sintetizado (dois tons alternados, estilo telefone clássico), sem precisar de arquivo de áudio externo. O som para automaticamente ao atender ou recusar.
 
-A documentacao oficial da API Lightning v3.1 mostra que o parametro correto para controlar o formato de saida e `output_format`, com as opcoes: `pcm` (padrao), `mp3`, `wav`, `mulaw`.
+## 2. Estilos diferentes para mensagens da Clara e do Usuário
 
-O codigo atual usa `add_wav_header: true`, que e um parametro do modelo Lightning antigo (deprecated). O Lightning v3.1 ignora esse parametro e retorna PCM cru (sem header), o que explica por que todos os metodos de playback falham.
+Atualmente ambas as bolhas de chat são muito parecidas (apenas opacidade diferente). As mudanças:
+- **Mensagens do Usuário**: bolha com fundo branco semi-transparente, alinhada à direita, bordas arredondadas com canto inferior direito reto
+- **Mensagens da Clara**: bolha com fundo em tom de accent/teal mais escuro, alinhada à esquerda, bordas arredondadas com canto inferior esquerdo reto, com um pequeno indicador "Clara" em destaque
 
-## Solucao
+## 3. Microfone em cor diferente
 
-Usar `output_format: "mp3"` -- o formato MP3 e suportado nativamente por todos os browsers no elemento `<audio>`, sem necessidade de parsing manual de headers.
+Mudar o botão do microfone para usar a cor secondary (amber/laranja) em vez do estilo atual transparente, tornando-o mais visível e distinto dos outros controles.
 
-## Alteracoes
+---
 
-### 1. Edge function `supabase/functions/tts-test/index.ts`
+## Detalhes Tecnicos
 
-- Remover `add_wav_header: true`
-- Adicionar `output_format: "mp3"`
-- Atualizar o Content-Type do debug para refletir MP3
+### Arquivo: `src/pages/CheckIn.tsx`
 
-### 2. Edge function `supabase/functions/voice-chat/index.ts`
+**Toque de celular (Ringtone)**:
+- Criar um hook/efeito que inicia quando `callState === 'incoming'`
+- Usar `OscillatorNode` da Web Audio API para gerar tons alternados (440Hz e 480Hz) com padrão ring-pause-ring
+- Usar `setInterval` para criar o padrão de toque (1s tocando, 2s silêncio)
+- Limpar tudo no cleanup do efeito (ao sair da tela ou atender)
 
-- Mesma correcao: remover `add_wav_header: true`, adicionar `output_format: "mp3"`
+**Estilos das mensagens**:
+- Usuário: `bg-white/25 rounded-lg rounded-br-none`
+- Clara: `bg-accent/30 rounded-lg rounded-bl-none border-l-2 border-secondary`
+- Label "Clara" em cor secondary (amber)
 
-### 3. Pagina de teste `src/pages/TtsTest.tsx`
-
-- Atualizar o Metodo A para usar `data:audio/mp3;base64,...` em vez de `audio/wav`
-- Atualizar o Metodo B para criar Blob com tipo `audio/mp3`
-- Simplificar o Metodo C (PCM manual) -- manter como fallback mas nao sera mais necessario
-
-### 4. Pagina de check-in `src/pages/CheckIn.tsx`
-
-- Simplificar `playAudio` para usar `<audio>` com Blob URL de MP3, removendo toda a logica de parsing manual de WAV/PCM que nao sera mais necessaria
-
-## Por que isso resolve
-
-- MP3 e universalmente suportado em todos os browsers
-- Nao precisa de parsing manual de headers
-- O `<audio>` element toca MP3 diretamente sem nenhum workaround
-- A API ja suporta esse formato nativamente
-
+**Cor do microfone**:
+- Mudar o fundo do botão do microfone em estado "listening" para `bg-secondary/80` (amber)
+- Em estado "speaking" manter `bg-destructive/80` (vermelho)
+- O ícone `Mic` ficará mais destacado com o contraste do amber
