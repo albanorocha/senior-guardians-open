@@ -1,40 +1,102 @@
 
 
-# Fix Transcript Not Working
+# Replace Atoms with Custom Voice Pipeline (Pulse STT + LLM + Lightning v3.1 TTS)
 
-## Problem Analysis
+## Overview
 
-The transcript event listener code is correct per the Atoms SDK documentation. However, looking at the logs, the sessions are very short (10-26 seconds) and the agent keeps ending the call prematurely. There are two possible causes:
+Remove the Atoms SDK dependency entirely and build a custom turn-based voice conversation using three APIs orchestrated through a single edge function:
 
-1. The `transcript` event might not be firing because the Atoms agent doesn't have transcription enabled in its configuration on the Smallest.ai dashboard
-2. The event data shape might differ from what the docs show
+1. **STT**: Smallest AI Pulse (`POST /api/v1/pulse/get_text`) - transcribes user speech
+2. **LLM**: Lovable AI (e.g., `openai/gpt-5-mini`) - generates Clara's conversational response
+3. **TTS**: Smallest AI Lightning v3.1 (`POST /api/v1/lightning-v3.1/get_speech`) - converts response to audio
 
-## What will be done
+## How it works
 
-### 1. Add debug logging for all SDK events
+The user presses and holds a "Talk" button (or uses voice activity detection). When released, the recorded audio is sent to an edge function that runs the full STT -> LLM -> TTS pipeline and returns both the transcript and audio to play.
 
-Add a catch-all event logger and specific debug logs for `transcript`, `agent_start_talking`, and `agent_stop_talking` events so we can see in the console if events are actually being emitted by the SDK.
+```text
+Browser (mic)
+  |-- records audio -->
+  |                     Edge Function: voice-chat
+  |                       1. POST audio to Pulse STT -> user text
+  |                       2. Send [system prompt + history + user text] to LLM -> response text
+  |                       3. POST response text to Lightning v3.1 TTS -> audio bytes
+  |                     Returns: { userText, agentText, audio (base64) }
+  |<-- plays audio --|
+```
 
-### 2. Also listen for alternative event names
+## Changes
 
-Some SDKs use variations like `message`, `text`, or `agent_transcript`. We will add listeners for these as fallback to cover any undocumented event names.
+### 1. New edge function: `supabase/functions/voice-chat/index.ts`
 
-### 3. Fix remaining Portuguese text
+Single endpoint that:
+- Receives audio as a base64 string + conversation history + patient context
+- Calls Pulse STT to transcribe the audio
+- Builds a prompt with Clara's personality, patient context (name, age, medications), and conversation history
+- Calls Lovable AI LLM for the response
+- Calls Lightning v3.1 TTS with a female voice to synthesize the response
+- Returns JSON: `{ userText, agentText, audioBase64 }`
 
-The toast error message on line 264 still says "Erro ao iniciar chamada" -- will change to English. The transcript placeholder text from the session replay shows "A transcricao aparecera aqui..." which also needs to be translated.
+Uses `SMALLEST_AI_API_KEY` (already configured) and `LOVABLE_API_KEY` (already configured).
 
-### 4. Fix time format in transcript
+### 2. Update `supabase/config.toml`
 
-Line 118 uses `pt-BR` locale for transcript timestamps -- will change to `en-US`.
+Add `[functions.voice-chat]` with `verify_jwt = false`.
 
-### Technical details
+### 3. Rewrite `src/pages/CheckIn.tsx`
 
-File: `src/pages/CheckIn.tsx`
+**Remove**: `AtomsClient` import, `atoms-client-sdk` dependency, all Atoms session/event code, `atoms-save-context` call, `atoms-session` call, `prepStep` states.
 
-- After `client.on('transcript', ...)` on line 243, add `console.log('[CheckIn] Transcript received:', data)` inside the handler
-- Add `console.log` inside `agent_start_talking` and `agent_stop_talking` handlers
-- Add listeners for alternative event names (`message`, `agent_transcript`, `text`) that also push to transcripts
-- Fix locale on line 118 from `pt-BR` to `en-US`
-- Fix toast text on line 264-265 to English
-- Fix any remaining Portuguese placeholder text in the transcript UI section
+**Add**:
+- `MediaRecorder` to capture mic audio when user holds the talk button
+- `isRecording` state and a large "Hold to Talk" button during active call
+- On release: encode audio to base64, POST to `voice-chat` edge function with conversation history and patient context
+- On response: play audio via `AudioContext`, add both user and agent messages to transcript
+- Keep existing: incoming call UI, preparing UI (simplified -- just "Connecting..."), active call UI with transcript, call summary
+
+**Conversation history**: maintained as `Array<{role: 'user'|'assistant', content: string}>` in state, sent with each request so the LLM has full context.
+
+### 4. Remove unused edge functions
+
+- `atoms-session` - no longer needed
+- `atoms-save-context` - context now sent directly in the voice-chat request  
+- `atoms-precall` - no longer needed
+
+Remove from `supabase/config.toml` as well.
+
+### 5. Remove `atoms-client-sdk` dependency
+
+No longer needed since we're using browser-native `MediaRecorder` + edge function.
+
+## Technical details
+
+### Pulse STT call (in edge function)
+```
+POST https://waves-api.smallest.ai/api/v1/pulse/get_text?model=pulse&language=en
+Authorization: Bearer {SMALLEST_AI_API_KEY}
+Content-Type: audio/wav
+Body: raw audio bytes
+```
+
+### Lightning v3.1 TTS call (in edge function)
+```
+POST https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_speech
+Authorization: Bearer {SMALLEST_AI_API_KEY}
+Content-Type: application/json
+Body: { "text": "...", "voice_id": "emily", "sample_rate": 24000, "speed": 1 }
+```
+
+### LLM call (in edge function)
+Uses Lovable AI gateway with `openai/gpt-5-mini` for fast, affordable responses. System prompt includes Clara's personality as a health companion, patient context, and instructions.
+
+### Browser audio
+- `MediaRecorder` with `audio/webm` format
+- Audio playback via `new Audio()` with base64 data URL or `AudioContext` for PCM
+- Push-to-talk UX: large circular button that records while held
+
+## What stays the same
+- Call summary screen (medications, mood, save)
+- Incoming call animation
+- Overall visual design
+- Database tables and check-in saving logic
 
