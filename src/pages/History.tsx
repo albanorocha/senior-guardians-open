@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useImpersonation } from '@/hooks/useImpersonation';
 import AppNav from '@/components/AppNav';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +17,7 @@ const moodEmoji: Record<string, string> = {
 
 const History = () => {
   const { user } = useAuth();
+  const { effectiveUserId } = useImpersonation();
   const [checkIns, setCheckIns] = useState<any[]>([]);
   const [responses, setResponses] = useState<Record<string, any[]>>({});
   const [alertsByCI, setAlertsByCI] = useState<Record<string, any[]>>({});
@@ -24,9 +26,9 @@ const History = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (!effectiveUserId) return;
     const fetchAll = async () => {
-      const { data: cis } = await supabase.from('check_ins').select('*').eq('user_id', user.id).order('scheduled_at', { ascending: false });
+      const { data: cis } = await supabase.from('check_ins').select('*').eq('user_id', effectiveUserId).order('scheduled_at', { ascending: false });
       setCheckIns(cis || []);
 
       if (cis && cis.length > 0) {
@@ -56,7 +58,7 @@ const History = () => {
       setLoading(false);
     };
     fetchAll();
-  }, [user]);
+  }, [effectiveUserId]);
 
   const formatDuration = (s: number | null) => {
     if (!s) return '-';
