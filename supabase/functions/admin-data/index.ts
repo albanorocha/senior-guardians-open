@@ -29,28 +29,43 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const { data: { user }, error: userError } = await anonClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const token = authHeader.replace("Bearer ", "");
+    let userId: string;
 
-    const userId = user.id;
+    // Try getClaims first (works with ES256 signing keys)
+    const { data: claimsData, error: claimsError } = await (anonClient.auth as any).getClaims(token);
+    console.log("getClaims result:", JSON.stringify(claimsData), "error:", JSON.stringify(claimsError));
+
+    if (!claimsError && claimsData?.claims?.sub) {
+      userId = claimsData.claims.sub;
+    } else {
+      // Fallback to getUser
+      const { data: { user }, error: userError } = await anonClient.auth.getUser(token);
+      console.log("getUser fallback:", user?.id, "error:", userError?.message);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+    console.log("Resolved userId:", userId);
 
     // Use service role client to check admin role
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: roleData } = await adminClient
+    const { data: roleData, error: roleError } = await adminClient
       .from("user_roles")
       .select("role")
       .eq("user_id", userId)
       .eq("role", "admin")
       .maybeSingle();
 
+    console.log("Role check for", userId, "result:", JSON.stringify(roleData), "error:", roleError?.message);
+
     if (!roleData) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
+      return new Response(JSON.stringify({ error: "Forbidden", debug: { userId, roleData, roleError: roleError?.message } }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
