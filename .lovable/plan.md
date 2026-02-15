@@ -1,42 +1,40 @@
 
 
-# Indicador visual de status dos medicamentos no Dashboard
+# Alertas em tempo real durante a chamada + estilo reforçado no Dashboard e History
 
-## O que muda
+## 1. Reduzir timeout de silêncio para 1 segundo
 
-O icone `Circle` cinza ao lado de cada medicamento no Dashboard sera transformado em um indicador de status em tempo real:
-- **Check verde** se o medicamento foi tomado hoje (existe um `check_in_response` com `taken=true` para hoje)
-- **X vermelho** se o medicamento nao foi tomado hoje (existe um `check_in_response` com `taken=false`)
-- **Circulo cinza** se ainda nao ha registro para hoje (pendente)
+**Arquivo:** `src/pages/CheckIn.tsx`, linha 34
+- `SILENCE_TIMEOUT_MS`: 2000 -> 1000
 
-## Como funciona
+## 2. Cards de alerta durante a chamada ativa (CheckIn)
 
-1. Ao carregar o Dashboard, buscar os `check_in_responses` de hoje junto com os dados existentes
-2. Cruzar cada medicamento com suas respostas do dia
-3. Renderizar o icone correto baseado no status
+Atualmente, os alertas só aparecem na tela de resumo (summary). A mudança adiciona um banner de alertas **durante a chamada ativa**, logo acima do chat, que aparece em tempo real quando a Clara dispara um alerta.
 
-## Detalhes tecnicos
+**Arquivo:** `src/pages/CheckIn.tsx`
+- No bloco `callState === 'active'` (entre o timer e o chat panel, por volta da linha 780), inserir um bloco que renderiza `callAlerts` em tempo real:
+  - Alerta de emergência: card com borda vermelha, fundo vermelho translúcido, ícone vermelho
+  - Notificação ao cuidador: card com borda azul, fundo azul translúcido, ícone azul
+  - Animação de entrada com framer-motion para cada novo alerta
 
-### `src/pages/Dashboard.tsx`
+## 3. Reforçar alertas no Dashboard
 
-**Nova query** no `fetchData` (dentro do useEffect):
-- Buscar `check_in_responses` de hoje, filtrando por check-ins do usuario com data de hoje
-- Criar um mapa `medicationId -> taken` para lookup rapido
+**Arquivo:** `src/pages/Dashboard.tsx`, linhas 152-173
+- Adicionar tratamento para `type === 'caregiver'`: borda azul, fundo azul claro, ícone azul (atualmente só tem emergency=vermelho e warning=amarelo)
+- Texto adicional para caregiver: "Caregiver was notified"
 
-**Substituir o icone** (linha 290):
-- `taken === true` -> `<CheckCircle className="h-5 w-5 text-green-500" />`
-- `taken === false` -> `<XCircle className="h-5 w-5 text-red-500" />`
-- Sem registro -> `<Circle className="h-5 w-5 text-muted-foreground" />` (como esta hoje)
+## 4. Reforçar alertas no History
 
-Os icones `CheckCircle` e `XCircle` ja estao importados no arquivo (linha 11).
+**Arquivo:** `src/pages/History.tsx`, linhas 148-158
+- Mesmo padrão: adicionar estilo diferenciado para alertas do tipo `caregiver`
+- Borda azul e fundo azul claro para alertas de notificação ao cuidador
+- Manter vermelho para emergências e amarelo para warnings
 
-### Query SQL equivalente
+## Resumo dos arquivos alterados
 
-```text
-1. Buscar check_ins de hoje do usuario
-2. Buscar check_in_responses desses check_ins
-3. Mapear medication_id -> taken (boolean)
-```
-
-Nenhuma mudanca de banco necessaria - usa dados ja existentes nas tabelas `check_ins` e `check_in_responses`.
+| Arquivo | Mudança |
+|---------|---------|
+| `src/pages/CheckIn.tsx` | SILENCE_TIMEOUT_MS -> 1000; banner de alertas durante chamada ativa |
+| `src/pages/Dashboard.tsx` | Estilo diferenciado para alertas caregiver (azul) |
+| `src/pages/History.tsx` | Estilo diferenciado para alertas caregiver (azul) |
 
