@@ -115,7 +115,7 @@ const CheckIn = () => {
     if (transcripts.length > 0) {
       const transcriptText = transcripts
         .map(t => {
-          const time = new Date(t.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const time = new Date(t.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           return `[${time}] Clara: ${t.text}`;
         })
         .join('\n');
@@ -240,16 +240,46 @@ const CheckIn = () => {
         handleEndCall();
       });
 
-      client.on('transcript', (data: { text: string; timestamp: number }) => {
+      // Debug: log all events from SDK
+      const originalEmit = (client as any).emit?.bind(client);
+      if (originalEmit) {
+        (client as any).emit = (event: string, ...args: any[]) => {
+          console.log(`[Atoms SDK Event] "${event}"`, ...args);
+          return originalEmit(event, ...args);
+        };
+      }
+
+      client.on('transcript', (data: any) => {
+        console.log('[CheckIn] Transcript event received:', JSON.stringify(data));
+        const text = typeof data === 'string' ? data : data?.text || data?.transcript || data?.message || JSON.stringify(data);
         setTranscripts(prev => [...prev, {
-          text: data.text,
-          timestamp: data.timestamp || Date.now(),
+          text,
+          timestamp: data?.timestamp || Date.now(),
           sender: 'agent',
         }]);
       });
 
-      client.on('agent_start_talking', () => setIsAgentTalking(true));
-      client.on('agent_stop_talking', () => setIsAgentTalking(false));
+      // Alternative event names as fallback
+      for (const eventName of ['message', 'agent_transcript', 'text', 'captions', 'caption']) {
+        client.on(eventName as any, (data: any) => {
+          console.log(`[CheckIn] Alternative event "${eventName}" received:`, JSON.stringify(data));
+          const text = typeof data === 'string' ? data : data?.text || data?.transcript || data?.message || JSON.stringify(data);
+          setTranscripts(prev => [...prev, {
+            text,
+            timestamp: data?.timestamp || Date.now(),
+            sender: 'agent',
+          }]);
+        });
+      }
+
+      client.on('agent_start_talking', () => {
+        console.log('[CheckIn] agent_start_talking');
+        setIsAgentTalking(true);
+      });
+      client.on('agent_stop_talking', () => {
+        console.log('[CheckIn] agent_stop_talking');
+        setIsAgentTalking(false);
+      });
 
       await client.startSession({
         accessToken: data.data.token,
@@ -261,7 +291,7 @@ const CheckIn = () => {
       setConnecting(false);
       setCallState('incoming');
       toast({
-        title: 'Erro ao iniciar chamada',
+        title: 'Failed to start call',
         description: err.message,
         variant: 'destructive',
       });
@@ -442,12 +472,12 @@ const CheckIn = () => {
               <h2 className="text-senior-lg font-bold">Clara</h2>
               {isAgentTalking && (
                 <span className="flex items-center gap-1 text-sm opacity-80">
-                  <Mic className="h-3 w-3" /> Falando...
+                  <Mic className="h-3 w-3" /> Speaking...
                 </span>
               )}
             </div>
             {connecting ? (
-              <p className="text-senior-base opacity-80 animate-pulse">Conectando...</p>
+              <p className="text-senior-base opacity-80 animate-pulse">Connecting...</p>
             ) : (
               <AudioVisualizer />
             )}
@@ -461,7 +491,7 @@ const CheckIn = () => {
               >
                 {transcripts.length === 0 && (
                   <p className="text-sm opacity-50 text-center mt-8">
-                    A transcrição aparecerá aqui...
+                    Transcript will appear here...
                   </p>
                 )}
                 {transcripts.map((t, i) => (
@@ -470,7 +500,7 @@ const CheckIn = () => {
                       <p className="text-sm leading-relaxed">{t.text}</p>
                     </div>
                     <span className="text-[10px] opacity-40 mt-0.5 ml-1">
-                      {new Date(t.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      {new Date(t.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
                   </div>
                 ))}
