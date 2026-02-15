@@ -457,33 +457,19 @@ const CheckIn = () => {
         bytes[i] = binaryStr.charCodeAt(i);
       }
 
-      // Parse WAV header to get sample rate and data offset
-      const view = new DataView(bytes.buffer);
-      const sampleRate = view.getUint32(24, true);  // offset 24 in WAV header
-      const bitsPerSample = view.getUint16(34, true); // offset 34
-      const dataOffset = 44; // standard WAV header size
-      const bytesPerSample = bitsPerSample / 8;
-      const numSamples = (bytes.length - dataOffset) / bytesPerSample;
-
-      // Convert 16-bit PCM to Float32
-      const float32 = new Float32Array(numSamples);
-      for (let i = 0; i < numSamples; i++) {
-        const sample = view.getInt16(dataOffset + i * 2, true);
-        float32[i] = sample / 32768;
-      }
-
-      // Create AudioBuffer and play
-      const playbackCtx = new AudioContext();
-      const audioBuffer = playbackCtx.createBuffer(1, numSamples, sampleRate);
-      audioBuffer.getChannelData(0).set(float32);
-      const source = playbackCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(playbackCtx.destination);
-      source.onended = () => {
+      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
         setIsPlaying(false);
-        playbackCtx.close();
+        URL.revokeObjectURL(url);
       };
-      source.start(0);
+      audio.onerror = () => {
+        console.error('[CheckIn] Audio playback error');
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
     } catch (err) {
       console.error('[CheckIn] Audio playback error:', err);
       setIsPlaying(false);
