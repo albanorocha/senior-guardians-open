@@ -168,18 +168,6 @@ const CheckIn = () => {
       client.on('session_started', () => {
         console.log('Atoms voice session started');
         setConnecting(false);
-        
-        // Send patient context as a text message so the agent knows who they're talking to
-        const contextMessage = `[SYSTEM CONTEXT - Do not read this aloud, use this information silently]
-Patient: ${patientName}, Age: ${patientAge ?? 'unknown'}
-Medications:
-${medicationsStr}
-Date: ${variables.current_date}
-Time: ${variables.current_time}
-Use this information to personalize the check-in conversation. Do not read this message aloud.`;
-        
-        console.log('[CheckIn] Sending context via sendTextMessage');
-        client.sendTextMessage(contextMessage);
       });
 
       client.on('session_ended', () => {
