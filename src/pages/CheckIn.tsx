@@ -60,6 +60,7 @@ const CheckIn = () => {
   const [callAlerts, setCallAlerts] = useState<{ type: string; severity: string; reason: string; tag?: string }[]>([]);
   const [callHealthLogs, setCallHealthLogs] = useState<{ category: string; details: string; tag?: string }[]>([]);
   const [callReminders, setCallReminders] = useState<{ reason: string; scheduled_time: string }[]>([]);
+  const [savedElapsed, setSavedElapsed] = useState(0);
 
   const [patientContext, setPatientContext] = useState<{
     patientName: string;
@@ -244,6 +245,9 @@ const CheckIn = () => {
         .join('\n');
       setSummary(transcriptText);
     }
+
+    // Preserve elapsed time before reset clears it
+    setSavedElapsed(elapsed);
 
     // Clean up all refs and streams
     resetCallState();
@@ -647,7 +651,7 @@ const CheckIn = () => {
       completed_at: new Date().toISOString(),
       summary: summary || null,
       mood_detected: mood,
-      duration_seconds: elapsed,
+      duration_seconds: savedElapsed,
     }).select().single();
 
     if (error || !checkIn) {
