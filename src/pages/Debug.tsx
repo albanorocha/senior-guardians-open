@@ -26,6 +26,7 @@ interface TestResult {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const TEST_USER_ID = '00000000-0000-0000-0000-000000000099';
+const REAL_AGENT_ID = '6990ef650d1c87f0c9a42402';
 
 const emptyResult = (): TestResult => ({ status: 'idle', steps: [] });
 
@@ -225,7 +226,7 @@ const Debug = () => {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/atoms-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY },
-        body: JSON.stringify({ agentId: 'test-debug-agent', variables: testVars, userId: TEST_USER_ID }),
+        body: JSON.stringify({ agentId: REAL_AGENT_ID, variables: testVars, userId: TEST_USER_ID }),
       });
       const json = await res.json();
       const sessionTime = Date.now() - sessionStart;
@@ -233,7 +234,7 @@ const Debug = () => {
       const sessionStep: StepResult = {
         label: 'POST atoms-session',
         status: res.ok ? 'success' : 'error',
-        message: res.ok ? `HTTP ${res.status} - Sessão criada (ou erro esperado de agentId)` : `HTTP ${res.status} - ${json.error || 'Erro'}`,
+        message: res.ok ? `HTTP ${res.status} - Sessão criada com sucesso!` : `HTTP ${res.status} - ${json.error || 'Erro'}`,
         data: json,
         time: sessionTime,
       };
@@ -258,9 +259,9 @@ const Debug = () => {
         time: dbTime,
       };
 
-      // The session call may fail due to invalid agentId but the important thing is if data was saved
+      const overallOk = res.ok && dbOk;
       setTest3({
-        status: dbOk ? 'success' : (res.status < 500 ? 'success' : 'error'),
+        status: overallOk ? 'success' : 'error',
         time: Date.now() - start,
         message: dbOk
           ? 'Dados salvos no banco com sucesso!'
@@ -296,7 +297,7 @@ const Debug = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY },
         body: JSON.stringify({
-          agentId: 'test-debug-flow',
+          agentId: REAL_AGENT_ID,
           variables: { patient_name: 'Fluxo Completo', patient_age: 77, medications: 'Aspirina 100mg', current_date: new Date().toLocaleDateString('pt-BR'), current_time: new Date().toLocaleTimeString('pt-BR') },
           userId: TEST_USER_ID,
         }),
