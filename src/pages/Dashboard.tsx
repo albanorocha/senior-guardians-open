@@ -152,23 +152,34 @@ const Dashboard = () => {
         {/* Active Alerts Banner */}
         {alerts.length > 0 && (
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-2">
-            {alerts.map(alert => (
-              <Card key={alert.id} className={`border-2 ${alert.type === 'emergency' ? 'border-destructive bg-destructive/5' : 'border-yellow-500 bg-yellow-500/5'}`}>
-                <CardContent className="flex items-center gap-3 py-3 px-4">
-                  <AlertTriangle className={`h-5 w-5 shrink-0 ${alert.type === 'emergency' ? 'text-destructive' : 'text-yellow-600'}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-senior-sm font-semibold">{alert.reason}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {alert.tag && <Badge variant="outline" className="mr-2 text-xs">{alert.tag}</Badge>}
-                      {format(new Date(alert.created_at), 'MMM d, h:mm a')}
-                    </p>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={() => acknowledgeAlert(alert.id)}>
-                    Dismiss
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+            {alerts.map(alert => {
+              const isEmergency = alert.type === 'emergency';
+              const isCaregiver = alert.type === 'caregiver';
+              const borderClass = isEmergency ? 'border-destructive bg-destructive/5' : isCaregiver ? 'border-blue-500 bg-blue-500/5' : 'border-yellow-500 bg-yellow-500/5';
+              const iconClass = isEmergency ? 'text-destructive' : isCaregiver ? 'text-blue-600' : 'text-yellow-600';
+              return (
+                <Card key={alert.id} className={`border-2 ${borderClass}`}>
+                  <CardContent className="flex items-center gap-3 py-3 px-4">
+                    {isCaregiver ? (
+                      <Bell className={`h-5 w-5 shrink-0 ${iconClass}`} />
+                    ) : (
+                      <AlertTriangle className={`h-5 w-5 shrink-0 ${iconClass}`} />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-senior-sm font-semibold">{alert.reason}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {isCaregiver && <span className="text-blue-600 font-medium mr-2">Caregiver was notified</span>}
+                        {alert.tag && <Badge variant="outline" className="mr-2 text-xs">{alert.tag}</Badge>}
+                        {format(new Date(alert.created_at), 'MMM d, h:mm a')}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => acknowledgeAlert(alert.id)}>
+                      Dismiss
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </motion.div>
         )}
 
