@@ -324,6 +324,8 @@ const CheckIn = () => {
   const [connecting, setConnecting] = useState(false);
 
   const handleAnswer = async () => {
+    // Limpar qualquer chamada anterior antes de iniciar nova
+    resetCallState();
     setConnecting(true);
     setTranscripts([]);
     setConversationHistory([]);
@@ -721,9 +723,11 @@ const CheckIn = () => {
                 <div className="relative flex items-center justify-center">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
                     micStatus === 'speaking'
-                      ? 'bg-destructive/80'
+                      ? 'bg-secondary'
                       : micStatus === 'listening'
                       ? 'bg-secondary/80'
+                      : micStatus === 'clara-speaking'
+                      ? 'bg-accent/60'
                       : 'bg-primary-foreground/10'
                   }`}>
                     {micStatus === 'processing' ? (
@@ -734,8 +738,8 @@ const CheckIn = () => {
                   </div>
                   {micStatus === 'speaking' && (
                     <>
-                      <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-destructive/60 animate-ping" />
-                      <div className="absolute -inset-2 w-20 h-20 rounded-full border border-destructive/30 animate-pulse" />
+                      <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-secondary/60 animate-ping" />
+                      <div className="absolute -inset-2 w-20 h-20 rounded-full border border-secondary/30 animate-pulse" />
                     </>
                   )}
                   {micStatus === 'listening' && (
