@@ -1,49 +1,81 @@
 
 
-# Fix: Name usage, call duration, and medication completeness
+# Ajustes na Clara e no Historico
 
-## 3 Issues to Fix
+## 1. Clara - Tom mais acolhedor e fluxo simplificado
 
-### Issue 1: Clara must always call the user by name
-The current prompt (line 221) says: "Do not repeat the senior's name in every reply - that's unnatural"
-This contradicts what the user wants. Change to instruct Clara to always address the patient by their first name.
+### Mudancas no prompt (`supabase/functions/voice-chat/index.ts`)
 
-### Issue 2: Call duration always saves as 0 in History
-In `handleEndCall` (line 235), `resetCallState()` is called which sets `elapsed` to 0 (line 114). Then when `handleSave` runs, it saves `duration_seconds: elapsed` which is already 0.
-Fix: add a `savedElapsed` state, capture `elapsed` before reset, use it in `handleSave`.
+**Saudacao acolhedora (Linha 240):**
+Trocar o opener frio por algo caloroso:
+- Antes: "Good morning! Let's check on your medications today."
+- Depois: Clara deve cumprimentar pelo nome, perguntar como o paciente esta se sentindo, e depois perguntar sobre os medicamentos de forma simples e agrupada.
+- Exemplo: "Bom dia, Joao! Como voce esta hoje? Tomou o Tylenol e a Desloratadina?"
 
-### Issue 3: Clara must always ask about ALL medications
-Looking at the logs, Clara sometimes only asks about some medications (e.g., asks about Tylenol but skips Desloratadina). The prompt says "ask about each medication BY NAME" but doesn't enforce asking about ALL of them before moving on.
-Fix: add stronger instruction to the prompt making it explicit that Clara must ask about EVERY medication in the list, one by one, and must NOT move to the wellness check until ALL medications have been individually confirmed or denied.
+**Pergunta sobre medicamentos de forma simples (Linhas 243-250):**
+Em vez de perguntar um por um (lento e cansativo), Clara deve listar todos os medicamentos numa pergunta so:
+- "Voce tomou o [med1], [med2] e [med3] hoje?"
+- Se o paciente confirmar tudo, chamar `report_medication_status` para cada um.
+- Se disser que faltou algum, perguntar qual especificamente.
 
-## File Changes
+**Encerramento positivo (Linha 259):**
+Trocar "Take care! I'll check in again [next time]." por instrucao para Clara sempre desejar um dia maravilhoso e encerrar de forma positiva e acolhedora.
+- Exemplo: "Que bom falar com voce, [nome]! Tenha um dia maravilhoso!"
 
-### 1. `supabase/functions/voice-chat/index.ts`
+### Resumo das mudancas no prompt
 
-**Line 221** - Replace "Do not repeat the senior's name in every reply" with:
-"Always address the patient by their first name. Use their name naturally to make them feel recognized and cared for."
+| Secao | Antes | Depois |
+|-------|-------|--------|
+| Opener | Saudacao fria, direto ao ponto | Cumprimento caloroso, perguntar como esta |
+| Medicamentos | Um por um, rigido | Listar todos numa pergunta simples |
+| Encerramento | Generico "Take care" | Desejar dia maravilhoso, tom acolhedor |
 
-**Lines 240-248** - Strengthen medication check instructions:
-Add: "You MUST ask about EVERY medication in the list. Do NOT skip any. Do NOT move to the wellness check until every single medication has been confirmed or denied. If the patient says 'I took everything', still call report_medication_status for EACH one."
+## 2. History - Mostrar logs da conversa
 
-### 2. `src/pages/CheckIn.tsx`
+O History ja mostra alertas, health logs e reminders por check-in (implementado anteriormente). Porem, o `summary` (resumo gerado pela Clara) aparece truncado no card e repetido dentro do collapsible.
 
-**Add state** `savedElapsed` (after line 62):
-```typescript
-const [savedElapsed, setSavedElapsed] = useState(0);
+### Melhoria: Secao "Conversation Notes"
+Adicionar uma secao dedicada no collapsible de cada check-in que mostre:
+- O **summary** completo da conversa (gerado pelo tool `generate_summary`)
+- Os **alertas** ja estao sendo mostrados (manter)
+- Os **health logs** ja estao sendo mostrados (manter)
+
+Nenhuma mudanca de banco necessaria - os dados ja estao salvos. Apenas melhorar a apresentacao visual do summary para que fique mais destacado como "notas da conversa".
+
+## Arquivos alterados
+
+| Arquivo | Mudanca |
+|---------|---------|
+| `supabase/functions/voice-chat/index.ts` | Reescrever opener, medicamentos agrupados, encerramento acolhedor |
+| `src/pages/History.tsx` | Destacar summary como "Conversation Notes" com melhor formatacao |
+
+## Detalhes tecnicos
+
+### Prompt - Secoes reescritas
+
+**Opener (linha 240):**
+```text
+1. Opener: Greet the patient warmly by name. Ask how they are feeling today. Then naturally transition to medications.
+   Example: "Good morning, [name]! How are you doing today? Did you take your [med1] and [med2]?"
 ```
 
-**In `handleEndCall`** (line 235), before `resetCallState()`:
-```typescript
-setSavedElapsed(elapsed);
+**Medication Check (linhas 243-250):**
+```text
+2. Medication Check - THIS IS YOUR PRIORITY:
+   - Ask about ALL medications in a single, simple question. List them by name.
+   - Example: "Did you take your [med1], [med2], and [med3] today?"
+   - If patient confirms all: call report_medication_status for EACH one individually with taken=true.
+   - If patient says they missed some: ask which ones specifically, then report each.
+   - You MUST call report_medication_status for EVERY medication before moving on.
 ```
 
-**In `handleSave`** (line 650), change `duration_seconds: elapsed` to `duration_seconds: savedElapsed`.
+**Wrapping Up (linha 259):**
+```text
+5. Wrapping Up: Always end on a positive, warm note. Wish the patient a wonderful day. Make them feel cared for.
+   Example: "It was so lovely talking to you, [name]! Have a wonderful day!" 
+   Then use generate_summary and end_call.
+```
 
-## Technical Summary
-
-| File | Change |
-|------|--------|
-| `supabase/functions/voice-chat/index.ts` | Always use patient name; enforce asking about ALL medications |
-| `src/pages/CheckIn.tsx` | Preserve call duration before state reset |
+### History.tsx - Summary como secao destacada
+Mover o summary de uma linha truncada para uma secao "Conversation Notes" com icone de mensagem, dentro do collapsible, antes dos alertas.
 
