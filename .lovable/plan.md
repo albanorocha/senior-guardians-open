@@ -1,38 +1,40 @@
 
 
-# Exibir Informacoes do Paciente na Tela de Preparacao
+# Fix Transcript Not Working
 
-## O que sera feito
+## Problem Analysis
 
-Na tela de "Preparando..." (estado `preparing`), alem dos passos de progresso, exibir um card com as informacoes do paciente que estao sendo enviadas para o agente Clara. Cada item tera um indicador visual mostrando se ja foi enviado e se o agente tem acesso.
+The transcript event listener code is correct per the Atoms SDK documentation. However, looking at the logs, the sessions are very short (10-26 seconds) and the agent keeps ending the call prematurely. There are two possible causes:
 
-## Mudancas em `src/pages/CheckIn.tsx`
+1. The `transcript` event might not be firing because the Atoms agent doesn't have transcription enabled in its configuration on the Smallest.ai dashboard
+2. The event data shape might differ from what the docs show
 
-### 1. Armazenar as variaveis preparadas em um estado
+## What will be done
 
-Adicionar um estado `preparedVariables` que guarda os dados coletados (nome, idade, medicamentos) para exibir na tela de preparacao. Preenchido durante a Fase 1 do `handleAnswer`.
+### 1. Add debug logging for all SDK events
 
-### 2. Atualizar a tela "preparing"
+Add a catch-all event logger and specific debug logs for `transcript`, `agent_start_talking`, and `agent_stop_talking` events so we can see in the console if events are actually being emitted by the SDK.
 
-Abaixo dos passos de progresso, adicionar um card semi-transparente mostrando:
+### 2. Also listen for alternative event names
 
-- **Nome do paciente**: ex. "Albano"
-- **Idade**: ex. "35 anos"
-- **Medicamentos**: lista com nome e dosagem de cada medicamento
-- **Status de envio**: icone de check verde + texto "Dados enviados ao agente" quando `prepStep` atingir `connecting` ou `done`, ou um loader enquanto ainda esta enviando
+Some SDKs use variations like `message`, `text`, or `agent_transcript`. We will add listeners for these as fallback to cover any undocumented event names.
 
-O card so aparece apos o passo "profile" ser concluido (quando os dados ja foram coletados). Quando os dados forem salvos no banco (passo "context" concluido), o card mostra confirmacao visual de que o agente tem acesso.
+### 3. Fix remaining Portuguese text
 
-### Detalhes visuais
+The toast error message on line 264 still says "Erro ao iniciar chamada" -- will change to English. The transcript placeholder text from the session replay shows "A transcricao aparecera aqui..." which also needs to be translated.
 
-- Card com fundo `bg-primary-foreground/10` e `backdrop-blur`
-- Titulo "Dados do paciente"
-- Cada campo como linha: label em opacidade reduzida, valor em destaque
-- Medicamentos como lista numerada compacta
-- Rodape do card com badge de status:
-  - Durante envio: Loader + "Enviando para Clara..."
-  - Apos envio: Check verde + "Clara tem acesso a estes dados"
+### 4. Fix time format in transcript
 
-### Nenhuma mudanca no backend
-Apenas alteracoes visuais no frontend usando dados ja disponiveis no fluxo.
+Line 118 uses `pt-BR` locale for transcript timestamps -- will change to `en-US`.
+
+### Technical details
+
+File: `src/pages/CheckIn.tsx`
+
+- After `client.on('transcript', ...)` on line 243, add `console.log('[CheckIn] Transcript received:', data)` inside the handler
+- Add `console.log` inside `agent_start_talking` and `agent_stop_talking` handlers
+- Add listeners for alternative event names (`message`, `agent_transcript`, `text`) that also push to transcripts
+- Fix locale on line 118 from `pt-BR` to `en-US`
+- Fix toast text on line 264-265 to English
+- Fix any remaining Portuguese placeholder text in the transcript UI section
 
