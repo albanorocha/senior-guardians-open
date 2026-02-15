@@ -533,8 +533,33 @@ const CheckIn = () => {
         if (item.tool === 'generate_summary') {
           setSummary(item.args.summary);
         }
-        if (item.tool === 'end_conversation') {
+        if (item.tool === 'end_call') {
           shouldEndCallRef.current = true;
+        }
+        if (item.tool === 'send_alert') {
+          toast({
+            title: '🚨 EMERGENCY ALERT SENT',
+            description: item.args.reason || 'Emergency services being contacted',
+            variant: 'destructive',
+          });
+          console.log('[CheckIn] Emergency alert:', item.args);
+        }
+        if (item.tool === 'send_alert_to_caregiver') {
+          toast({
+            title: '📋 Caregiver Notified',
+            description: item.args.reason || 'Caregiver has been alerted',
+          });
+          console.log('[CheckIn] Caregiver alert:', item.args);
+        }
+        if (item.tool === 'log_health_data') {
+          console.log('[CheckIn] Health data logged:', item.args);
+        }
+        if (item.tool === 'schedule_reminder') {
+          toast({
+            title: `⏰ Reminder scheduled`,
+            description: `Clara will call back ${item.args.time || 'later'}`,
+          });
+          console.log('[CheckIn] Reminder scheduled:', item.args);
         }
       }
     }
