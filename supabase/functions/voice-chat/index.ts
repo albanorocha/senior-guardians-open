@@ -65,8 +65,10 @@ serve(async (req) => {
       console.log('[voice-chat] Transcribed text:', userText);
 
       if (!userText.trim()) {
-        return new Response(JSON.stringify({ error: 'Could not transcribe audio. Please try speaking again.' }), {
-          status: 400,
+        // Return a success response with empty text instead of error
+        // This prevents client-side error handling for background noise
+        return new Response(JSON.stringify({ userText: '', agentText: '', audioBase64: null, empty: true }), {
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
