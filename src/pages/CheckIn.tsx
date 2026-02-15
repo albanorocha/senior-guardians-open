@@ -29,7 +29,7 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
   { value: 'distressed', emoji: '😟', label: 'Distressed' },
 ];
 
-const SILENCE_THRESHOLD = 25;
+const SILENCE_THRESHOLD = 30;
 const SILENCE_TIMEOUT_MS = 2000;
 const VAD_CHECK_INTERVAL_MS = 100;
 const MIN_BLOB_SIZE = 5000;
@@ -413,7 +413,13 @@ const CheckIn = () => {
     }
   };
 
-  const handleVoiceResponse = (data: { userText?: string; agentText: string; audioBase64?: string | null }) => {
+  const handleVoiceResponse = (data: { userText?: string; agentText: string; audioBase64?: string | null; empty?: boolean }) => {
+    // Skip empty transcriptions (background noise)
+    if (data.empty || !data.agentText) {
+      console.log('[CheckIn] Empty response, resuming listening');
+      return;
+    }
+
     // Add agent transcript
     setTranscripts(prev => [...prev, { text: data.agentText, timestamp: Date.now(), sender: 'agent' }]);
     setConversationHistory(prev => [...prev, { role: 'assistant', content: data.agentText }]);
