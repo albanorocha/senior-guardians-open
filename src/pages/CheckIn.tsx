@@ -60,6 +60,7 @@ const CheckIn = () => {
     medications: { name: string; dosage: string }[];
   } | null>(null);
 
+  const shouldEndCallRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -496,11 +497,40 @@ const CheckIn = () => {
     }
   };
 
-  const handleVoiceResponse = (data: { userText?: string; agentText: string; audioBase64?: string | null; empty?: boolean }) => {
+  const handleVoiceResponse = (data: { userText?: string; agentText: string; audioBase64?: string | null; empty?: boolean; extractedData?: { tool: string; args: any }[] }) => {
     // Skip empty transcriptions (background noise)
     if (data.empty || !data.agentText) {
       console.log('[CheckIn] Empty response, resuming listening');
       return;
+    }
+
+    // Process extracted data from tool calls
+    if (data.extractedData) {
+      for (const item of data.extractedData) {
+        if (item.tool === 'report_medication_status') {
+          const med = medications.find(m =>
+            m.name.toLowerCase().includes(item.args.medication_name?.toLowerCase() || '')
+          );
+          if (med) {
+            setResponses(r => ({
+              ...r,
+              [med.id]: { taken: item.args.taken, issues: item.args.side_effects || '' }
+            }));
+            toast({ title: `${med.name}: ${item.args.taken ? '✅ Taken' : '❌ Not taken'}` });
+          }
+        }
+        if (item.tool === 'report_mood') {
+          setMood(item.args.mood);
+          const moodEmoji = moodOptions.find(m => m.value === item.args.mood)?.emoji || '';
+          toast({ title: `Mood: ${moodEmoji} ${item.args.mood}` });
+        }
+        if (item.tool === 'generate_summary') {
+          setSummary(item.args.summary);
+        }
+        if (item.tool === 'end_conversation') {
+          shouldEndCallRef.current = true;
+        }
+      }
     }
 
     // Add agent transcript
@@ -510,6 +540,10 @@ const CheckIn = () => {
     // Play audio if available
     if (data.audioBase64) {
       playAudio(data.audioBase64);
+    } else if (shouldEndCallRef.current) {
+      // No audio to play but end_conversation was called
+      shouldEndCallRef.current = false;
+      handleEndCall();
     }
   };
 
@@ -528,6 +562,10 @@ const CheckIn = () => {
       audio.onended = () => {
         setIsPlaying(false);
         URL.revokeObjectURL(url);
+        if (shouldEndCallRef.current) {
+          shouldEndCallRef.current = false;
+          handleEndCall();
+        }
       };
       audio.onerror = () => {
         console.error('[CheckIn] Audio playback error');
