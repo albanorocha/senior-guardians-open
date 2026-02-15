@@ -12,6 +12,7 @@ import Medications from "./pages/Medications";
 import CheckIn from "./pages/CheckIn";
 import History from "./pages/History";
 import NotFound from "./pages/NotFound";
+import Debug from "./pages/Debug";
 
 const queryClient = new QueryClient();
 
@@ -26,6 +27,7 @@ const App = () => (
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/debug" element={<Debug />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/medications" element={<ProtectedRoute><Medications /></ProtectedRoute>} />
             <Route path="/check-in" element={<ProtectedRoute><CheckIn /></ProtectedRoute>} />
