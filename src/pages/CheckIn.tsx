@@ -29,11 +29,11 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
   { value: 'distressed', emoji: '😟', label: 'Distressed' },
 ];
 
-const SILENCE_THRESHOLD = 30;
+const SILENCE_THRESHOLD = 20;
 const SILENCE_TIMEOUT_MS = 2000;
 const VAD_CHECK_INTERVAL_MS = 100;
 const MIN_BLOB_SIZE = 5000;
-const MIN_RECORDING_DURATION_MS = 800;
+const MIN_RECORDING_DURATION_MS = 1000;
 
 const CheckIn = () => {
   const { user } = useAuth();
@@ -52,6 +52,7 @@ const CheckIn = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [micStatus, setMicStatus] = useState<MicStatus>('listening');
   const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const conversationHistoryRef = useRef<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [textInput, setTextInput] = useState('');
   const [patientContext, setPatientContext] = useState<{
     patientName: string;
@@ -77,6 +78,7 @@ const CheckIn = () => {
   // Keep refs in sync with state
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+  useEffect(() => { conversationHistoryRef.current = conversationHistory; }, [conversationHistory]);
 
   // Full state reset function
   const resetCallState = useCallback(() => {
@@ -462,7 +464,7 @@ const CheckIn = () => {
         },
         body: JSON.stringify({
           audioBase64,
-          history: conversationHistory,
+          history: conversationHistoryRef.current,
           patientContext,
         }),
       });

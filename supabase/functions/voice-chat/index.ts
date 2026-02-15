@@ -46,7 +46,7 @@ serve(async (req) => {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${SMALLEST_AI_API_KEY}`,
-          'Content-Type': 'audio/webm',
+          'Content-Type': 'audio/webm;codecs=opus',
         },
         body: audioBytes.buffer,
       });
