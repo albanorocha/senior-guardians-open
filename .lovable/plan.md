@@ -1,19 +1,17 @@
 
-# Melhorias Visuais e Sonoras no Check-In
+# Correções: Finalizar chamada antes de nova + Cor do microfone
 
-## 1. Som de toque na tela de chamada recebida
+## 1. Finalizar chamada anterior antes de iniciar nova
 
-Adicionar um som de toque de celular que toca em loop enquanto a tela "incoming" estiver ativa. Usar a Web Audio API para gerar um tom de toque sintetizado (dois tons alternados, estilo telefone clássico), sem precisar de arquivo de áudio externo. O som para automaticamente ao atender ou recusar.
+**Problema**: Ao atender uma nova chamada, o codigo nao limpa os recursos da chamada anterior (streams de audio, MediaRecorder, AudioContext). Isso causa dois audios tocando simultaneamente.
 
-## 2. Estilos diferentes para mensagens da Clara e do Usuário
+**Solucao**: Chamar `resetCallState()` no inicio de `handleAnswer()` para garantir que todos os recursos da chamada anterior sejam liberados antes de iniciar uma nova.
 
-Atualmente ambas as bolhas de chat são muito parecidas (apenas opacidade diferente). As mudanças:
-- **Mensagens do Usuário**: bolha com fundo branco semi-transparente, alinhada à direita, bordas arredondadas com canto inferior direito reto
-- **Mensagens da Clara**: bolha com fundo em tom de accent/teal mais escuro, alinhada à esquerda, bordas arredondadas com canto inferior esquerdo reto, com um pequeno indicador "Clara" em destaque
+## 2. Cor do microfone
 
-## 3. Microfone em cor diferente
+**Problema**: O microfone no estado "listening" ja foi alterado para `bg-secondary/80` (amber), mas o usuario quer confirmar que nao esta vermelho.
 
-Mudar o botão do microfone para usar a cor secondary (amber/laranja) em vez do estilo atual transparente, tornando-o mais visível e distinto dos outros controles.
+**Verificacao**: Confirmar que o estado `listening` usa `bg-secondary/80` (amber/laranja) e nao vermelho. O vermelho (`bg-destructive/80`) deve ser usado apenas quando o usuario esta falando (`speaking`).
 
 ---
 
@@ -21,18 +19,27 @@ Mudar o botão do microfone para usar a cor secondary (amber/laranja) em vez do 
 
 ### Arquivo: `src/pages/CheckIn.tsx`
 
-**Toque de celular (Ringtone)**:
-- Criar um hook/efeito que inicia quando `callState === 'incoming'`
-- Usar `OscillatorNode` da Web Audio API para gerar tons alternados (440Hz e 480Hz) com padrão ring-pause-ring
-- Usar `setInterval` para criar o padrão de toque (1s tocando, 2s silêncio)
-- Limpar tudo no cleanup do efeito (ao sair da tela ou atender)
+**Mudanca 1 — `handleAnswer` (linha ~326)**:
+Adicionar `resetCallState()` como primeira acao dentro de `handleAnswer`, antes de qualquer setup novo. Isso garante que:
+- MediaRecorder anterior e parado
+- Streams de audio anteriores sao fechados
+- AudioContext anterior e encerrado
+- Todos os refs sao resetados
 
-**Estilos das mensagens**:
-- Usuário: `bg-white/25 rounded-lg rounded-br-none`
-- Clara: `bg-accent/30 rounded-lg rounded-bl-none border-l-2 border-secondary`
-- Label "Clara" em cor secondary (amber)
+```typescript
+const handleAnswer = async () => {
+  // Limpar qualquer chamada anterior antes de iniciar nova
+  resetCallState();
+  setConnecting(true);
+  // ... resto do codigo
+};
+```
 
-**Cor do microfone**:
-- Mudar o fundo do botão do microfone em estado "listening" para `bg-secondary/80` (amber)
-- Em estado "speaking" manter `bg-destructive/80` (vermelho)
-- O ícone `Mic` ficará mais destacado com o contraste do amber
+**Mudanca 2 — Cor do microfone**:
+Verificar e garantir que as cores estejam corretas:
+- `listening` → `bg-secondary/80` (amber/laranja) — ja implementado
+- `speaking` → `bg-secondary` (amber, mesma familia, nao vermelho)
+- `processing` → indicador de loading
+- `clara-speaking` → `bg-accent/60` (teal, indicando que a Clara esta falando)
+
+Isso remove o vermelho do microfone completamente, usando amber para estados do usuario e teal para estados da Clara.
