@@ -7,15 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Phone, Pill, CheckCircle, Circle, XCircle, ChevronRight } from 'lucide-react';
-import { format } from 'date-fns';
+import { Progress } from '@/components/ui/progress';
+import { Phone, Pill, CheckCircle, Circle, XCircle, ChevronRight, AlertTriangle, Bell, Clock, Activity } from 'lucide-react';
+import { format, subDays, startOfDay } from 'date-fns';
 import { motion } from 'framer-motion';
 
 const moodEmoji: Record<string, string> = {
-  happy: '😊',
-  neutral: '😐',
-  confused: '😕',
-  distressed: '😟',
+  happy: '😊', neutral: '😐', confused: '😕', distressed: '😟',
 };
 
 const Dashboard = () => {
@@ -23,23 +21,73 @@ const Dashboard = () => {
   const [profile, setProfile] = useState<any>(null);
   const [medications, setMedications] = useState<any[]>([]);
   const [checkIns, setCheckIns] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [healthLogs, setHealthLogs] = useState<any[]>([]);
+  const [adherencePercent, setAdherencePercent] = useState(0);
+  const [streak, setStreak] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     const fetchData = async () => {
-      const [profileRes, medsRes, checkInsRes] = await Promise.all([
+      const [profileRes, medsRes, checkInsRes, alertsRes, remindersRes, healthRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('medications').select('*').eq('user_id', user.id).eq('active', true).order('created_at'),
         supabase.from('check_ins').select('*').eq('user_id', user.id).order('scheduled_at', { ascending: false }).limit(5),
+        supabase.from('alerts').select('*').eq('user_id', user.id).eq('acknowledged', false).order('created_at', { ascending: false }),
+        supabase.from('scheduled_reminders').select('*').eq('user_id', user.id).eq('status', 'pending').order('created_at', { ascending: false }),
+        supabase.from('health_logs').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       ]);
       setProfile(profileRes.data);
       setMedications(medsRes.data || []);
       setCheckIns(checkInsRes.data || []);
+      setAlerts(alertsRes.data || []);
+      setReminders(remindersRes.data || []);
+      setHealthLogs(healthRes.data || []);
+
+      // Calculate adherence from last 30 days
+      const thirtyDaysAgo = subDays(new Date(), 30).toISOString();
+      const { data: recentCheckIns } = await supabase.from('check_ins').select('id, scheduled_at').eq('user_id', user.id).gte('scheduled_at', thirtyDaysAgo).eq('status', 'completed');
+      if (recentCheckIns && recentCheckIns.length > 0) {
+        const ciIds = recentCheckIns.map(c => c.id);
+        const { data: allResponses } = await supabase.from('check_in_responses').select('check_in_id, taken').in('check_in_id', ciIds);
+        
+        // Group by check_in_id, count compliant days
+        const grouped: Record<string, boolean[]> = {};
+        allResponses?.forEach(r => {
+          if (!grouped[r.check_in_id]) grouped[r.check_in_id] = [];
+          grouped[r.check_in_id].push(r.taken || false);
+        });
+        const totalDays = Object.keys(grouped).length;
+        const compliantDays = Object.values(grouped).filter(arr => arr.every(t => t)).length;
+        setAdherencePercent(totalDays > 0 ? Math.round((compliantDays / totalDays) * 100) : 0);
+
+        // Calculate streak (consecutive compliant from most recent)
+        const sortedCheckIns = recentCheckIns.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
+        let s = 0;
+        for (const ci of sortedCheckIns) {
+          const resps = grouped[ci.id];
+          if (resps && resps.every(t => t)) s++;
+          else break;
+        }
+        setStreak(s);
+      }
+
       setLoading(false);
     };
     fetchData();
   }, [user]);
+
+  const acknowledgeAlert = async (alertId: string) => {
+    await supabase.from('alerts').update({ acknowledged: true }).eq('id', alertId);
+    setAlerts(prev => prev.filter(a => a.id !== alertId));
+  };
+
+  const updateReminder = async (id: string, status: string) => {
+    await supabase.from('scheduled_reminders').update({ status }).eq('id', id);
+    setReminders(prev => prev.filter(r => r.id !== id));
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -80,6 +128,29 @@ const Dashboard = () => {
           <p className="text-senior-base text-muted-foreground">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
         </motion.div>
 
+        {/* Active Alerts Banner */}
+        {alerts.length > 0 && (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-2">
+            {alerts.map(alert => (
+              <Card key={alert.id} className={`border-2 ${alert.type === 'emergency' ? 'border-destructive bg-destructive/5' : 'border-yellow-500 bg-yellow-500/5'}`}>
+                <CardContent className="flex items-center gap-3 py-3 px-4">
+                  <AlertTriangle className={`h-5 w-5 shrink-0 ${alert.type === 'emergency' ? 'text-destructive' : 'text-yellow-600'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-senior-sm font-semibold">{alert.reason}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {alert.tag && <Badge variant="outline" className="mr-2 text-xs">{alert.tag}</Badge>}
+                      {format(new Date(alert.created_at), 'MMM d, h:mm a')}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => acknowledgeAlert(alert.id)}>
+                    Dismiss
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </motion.div>
+        )}
+
         {/* Talk to Clara CTA */}
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}>
           <Link to="/check-in">
@@ -101,8 +172,98 @@ const Dashboard = () => {
           </Link>
         </motion.div>
 
+        {/* Adherence Stats */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <Card className="shadow-soft">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-senior-lg flex items-center gap-2">
+                <Activity className="h-5 w-5 text-primary" /> Adherence
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-senior-sm text-muted-foreground">Last 30 days</span>
+                <span className="text-senior-lg font-bold text-primary">{adherencePercent}%</span>
+              </div>
+              <Progress value={adherencePercent} className="h-3" />
+              <p className="text-senior-sm text-muted-foreground">
+                🔥 Current streak: <span className="font-semibold text-foreground">{streak} day{streak !== 1 ? 's' : ''}</span>
+              </p>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Upcoming Reminders */}
+        {reminders.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+            <Card className="shadow-soft">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-senior-lg flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-primary" /> Reminders
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {reminders.map(r => (
+                  <div key={r.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
+                    <Bell className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-senior-sm">{r.reason}</p>
+                      <p className="text-xs text-muted-foreground">{r.scheduled_time}</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => updateReminder(r.id, 'completed')}>✓</Button>
+                      <Button size="sm" variant="ghost" onClick={() => updateReminder(r.id, 'cancelled')}>✕</Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Health Snapshot */}
+        {(checkIns.some(c => c.mood_detected) || healthLogs.length > 0) && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+            <Card className="shadow-soft">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-senior-lg flex items-center gap-2">
+                  📊 Health Snapshot
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Mood trend */}
+                {checkIns.some(c => c.mood_detected) && (
+                  <div>
+                    <p className="text-senior-sm text-muted-foreground mb-1">Recent moods</p>
+                    <div className="flex gap-2">
+                      {checkIns.filter(c => c.mood_detected).slice(0, 5).map((c, i) => (
+                        <span key={i} className="text-xl" title={format(new Date(c.scheduled_at), 'MMM d')}>
+                          {moodEmoji[c.mood_detected] || '😐'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Recent health logs */}
+                {healthLogs.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-senior-sm text-muted-foreground">Recent logs</p>
+                    {healthLogs.slice(0, 3).map(h => (
+                      <div key={h.id} className="flex items-center gap-2 text-sm">
+                        <Badge variant="secondary" className="text-xs">{h.category}</Badge>
+                        <span className="truncate">{h.details}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Link to="/history" className="text-primary text-sm font-medium hover:underline">View all →</Link>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
         {/* Today's Medications */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
           <Card className="shadow-soft">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-senior-lg flex items-center gap-2">
@@ -136,7 +297,7 @@ const Dashboard = () => {
         </motion.div>
 
         {/* Recent Check-ins */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
           <Card className="shadow-soft">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-senior-lg">Recent Check-ins</CardTitle>
