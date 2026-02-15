@@ -1,49 +1,72 @@
 
 
-# Remove Debug Page, Atoms References, and Fix Stuck "Connecting" Screen
+# Fix Clara's Audio Playback
 
-## Overview
+## Root Cause
 
-The "Connecting..." screen gets stuck because `handleAnswer` errors out silently before reaching the `active` state. The fix is to remove the intermediate `preparing` state entirely -- go straight from `incoming` to `active`, and handle errors gracefully. Additionally, the Debug page and all atoms-related code will be removed.
+Console logs show repeated errors:
+```
+[CheckIn] Audio play() failed: NotSupportedError: The element has no supported sources.
+```
 
-## Changes
+The TTS API (Lightning v3.1) returns 24kHz WAV audio. While the edge function adds a WAV header (`add_wav_header: true`), the HTML `<audio>` element in the browser sandbox doesn't support this specific WAV encoding. The Blob URL approach fixed the size issue but the format is still unsupported by `<audio>`.
 
-### 1. Delete `src/pages/Debug.tsx`
-Remove the entire file -- it only contains atoms-related diagnostic tests.
+## Solution
 
-### 2. Remove Debug route from `src/App.tsx`
-- Remove the `import Debug` line
-- Remove the `<Route path="/debug" ...>` line
+Replace the `<audio>` element playback with **Web Audio API** (`AudioContext.decodeAudioData`), which supports a much wider range of audio formats including raw PCM WAV at any sample rate.
 
-### 3. Remove "preparing" state from `src/pages/CheckIn.tsx`
+## Changes to `src/pages/CheckIn.tsx`
 
-**Remove the `preparing` CallState:**
-- Change the type from `'incoming' | 'preparing' | 'active' | 'summary'` to `'incoming' | 'active' | 'summary'`
-- Delete the entire "PREPARING" UI block (lines 583-598)
+### 1. Replace `playAudio` function
 
-**Simplify `handleAnswer`:**
-- Remove `setCallState('preparing')` at the start
-- Keep all the setup logic (fetch profile, unlock audio, get mic, create AudioContext)
-- Only set `setCallState('active')` at the end on success
-- On error, stay on `incoming` (already handled) and show the toast
+Instead of:
+```typescript
+const audio = new Audio();
+audio.src = blobUrl;
+audio.play(); // FAILS: "no supported sources"
+```
 
-This way, the user stays on the "incoming" screen while setup happens (the green button can show a loading spinner), and transitions directly to the active call once everything is ready.
+Use:
+```typescript
+const playAudio = async (base64: string) => {
+  setIsPlaying(true);
+  try {
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
 
-**Add loading state to the answer button:**
-- Add a `connecting` boolean state
-- Set it `true` when `handleAnswer` starts, `false` when done (success or error)
-- Show a `Loader2` spinner on the green answer button while connecting
-- Disable the button while connecting
+    // Use Web Audio API which supports more formats
+    const playbackCtx = new AudioContext();
+    const audioBuffer = await playbackCtx.decodeAudioData(bytes.buffer.slice(0));
+    const source = playbackCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(playbackCtx.destination);
+    source.onended = () => {
+      setIsPlaying(false);
+      playbackCtx.close();
+    };
+    source.start(0);
+  } catch (err) {
+    console.error('[CheckIn] Audio playback error:', err);
+    setIsPlaying(false);
+  }
+};
+```
 
-### 4. Remove any atoms references from `src/components/AppNav.tsx` (if any)
-Check if there's a link to `/debug` in the navigation and remove it.
+### 2. Remove `audioRef`
 
-## Technical Summary
+The `audioRef` (which held an `HTMLAudioElement`) is no longer needed since we use `AudioContext` directly. Remove its declaration and any references in `resetCallState`.
 
-| File | Action |
-|------|--------|
-| `src/pages/Debug.tsx` | Delete |
-| `src/App.tsx` | Remove Debug import and route |
-| `src/pages/CheckIn.tsx` | Remove `preparing` state, add loading spinner to answer button |
-| `src/components/AppNav.tsx` | Remove `/debug` link if present |
+### 3. Keep the "unlock audio" tap in `handleAnswer`
+
+The existing silent audio context unlock on iOS/Safari remains important -- it ensures `AudioContext` can be created after a user gesture.
+
+## Why This Works
+
+- `AudioContext.decodeAudioData()` supports PCM WAV at any sample rate (8kHz, 16kHz, 24kHz, 44.1kHz, 48kHz)
+- No dependency on browser codec support for `<audio>` element
+- Creates a fresh `AudioContext` per playback, avoiding state issues between calls
+- The `onended` callback properly resets `isPlaying` so VAD resumes after Clara finishes speaking
 
