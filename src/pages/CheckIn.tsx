@@ -81,6 +81,10 @@ const CheckIn = () => {
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
   useEffect(() => { conversationHistoryRef.current = conversationHistory; }, [conversationHistory]);
 
+  // Keep medications ref in sync to avoid stale closures in VAD callbacks
+  const medicationsRef = useRef(medications);
+  useEffect(() => { medicationsRef.current = medications; }, [medications]);
+
   // Full state reset function
   const resetCallState = useCallback(() => {
     clearInterval(timerRef.current);
@@ -223,7 +227,7 @@ const CheckIn = () => {
 
   const handleEndCall = () => {
     // Pre-fill summary with transcript before reset
-    if (transcripts.length > 0) {
+    if (!summary && transcripts.length > 0) {
       const transcriptText = transcripts
         .map(t => {
           const time = new Date(t.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -508,9 +512,11 @@ const CheckIn = () => {
     if (data.extractedData) {
       for (const item of data.extractedData) {
         if (item.tool === 'report_medication_status') {
-          const med = medications.find(m =>
-            m.name.toLowerCase().includes(item.args.medication_name?.toLowerCase() || '')
-          );
+          const med = medicationsRef.current.find(m => {
+            const dbName = m.name.toLowerCase();
+            const aiName = (item.args.medication_name || '').toLowerCase();
+            return dbName.includes(aiName) || aiName.includes(dbName);
+          });
           if (med) {
             setResponses(r => ({
               ...r,
