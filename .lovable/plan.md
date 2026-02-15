@@ -1,83 +1,59 @@
 
+# Debug Visual no Frontend
 
-# Corrigir Injecao de Contexto: Pre Call API e a Unica Opcao para Webcall
+Criar uma pagina `/debug` com um painel visual que testa cada etapa do fluxo de dados, permitindo identificar exatamente onde o problema esta.
 
-## Descoberta Importante
+## O que sera criado
 
-O metodo `sendTextMessage()` do SDK **so funciona no modo "chat"**, nao no modo "webcall" (voz). A documentacao oficial do Atoms mostra explicitamente:
+### Pagina Debug (`src/pages/Debug.tsx`)
 
-```text
-sendMessage(message: string) {
-  if (this.mode === "chat") {        // <-- so funciona em chat
-    this.client.sendTextMessage(message);
-  }
-}
-```
+Um painel com 4 testes, cada um em um card com botao para executar:
 
-Por isso a Clara nunca recebe o contexto -- a mensagem e ignorada silenciosamente no modo webcall.
+**Teste 1 - Dados no Banco**
+- Consulta a tabela `pre_call_context` usando o Supabase client
+- Mostra o ultimo registro salvo (user_id, variables, created_at)
+- Indica se tem dados ou se esta vazio
 
-## Opcoes Disponiveis
+**Teste 2 - Chamar atoms-precall diretamente**
+- Faz um `fetch` POST para a edge function `atoms-precall` a partir do browser
+- Mostra a resposta JSON exata (o que o Atoms receberia)
+- Verifica se o formato esta correto (`{ variables: { ... } }`)
 
-Para webcall, a unica forma de passar contexto dinamico e o **Pre Call API Node** no Workflow do agente. Isso requer configuracao no dashboard do Atoms.
+**Teste 3 - Fluxo completo simulado**
+- Insere dados de teste na tabela `pre_call_context` via `atoms-session`
+- Imediatamente chama `atoms-precall` para verificar se retorna os dados
+- Mostra o resultado de ambas as etapas
 
-## O que precisa ser feito
+**Teste 4 - Informacoes uteis**
+- Mostra a URL completa do webhook para copiar e colar no dashboard do Atoms
+- Mostra o comando `curl` exato para testar externamente
+- Mostra o formato JSON esperado pelo Atoms
 
-### 1. No Dashboard do Atoms (feito por voce)
+Cada teste mostra:
+- Status visual (verde/vermelho/cinza)
+- Tempo de resposta em ms
+- JSON formatado da resposta
+- Mensagem de diagnostico
 
-Ir ate o agente Clara e configurar o **Workflow Editor**:
+### Rota no App (`src/App.tsx`)
 
-1. Abrir o agente no dashboard do Atoms
-2. Ir para **Workflow Editor** (nao "API Calls Settings")
-3. Adicionar um **Pre Call API Node**
-4. Conectar o Pre Call API Node ao **Start Node**
-5. Configurar a URL do webhook:
-   - URL: `https://rlbratdaqtdpbifkceds.supabase.co/functions/v1/atoms-precall`
-   - Metodo: POST
-   - Headers: nenhum necessario (a funcao ja esta configurada para aceitar qualquer origem)
-6. **Mapear as variaveis** da resposta da API para as variaveis do agente:
-   - `patient_name` -> JSONPath: `$.variables.patient_name`
-   - `patient_age` -> JSONPath: `$.variables.patient_age`
-   - `medications` -> JSONPath: `$.variables.medications`
-   - `current_date` -> JSONPath: `$.variables.current_date`
-   - `current_time` -> JSONPath: `$.variables.current_time`
-7. Usar essas variaveis no prompt do agente (ex: `{{patient_name}}`, `{{medications}}`)
+- Adicionar rota publica `/debug` (sem `ProtectedRoute`) para facilitar testes
 
-### 2. No Codigo (feito por mim)
+## Detalhes Tecnicos
 
-- **Reverter o `sendTextMessage`** do CheckIn.tsx (remover o codigo que envia contexto via texto, ja que nao funciona em webcall)
-- **Restaurar o salvamento de contexto** no `atoms-session` para que ele salve as variaveis na tabela `pre_call_context` antes de criar o webcall
-- O `atoms-precall` ja esta funcionando e retornando as variaveis corretamente -- so precisa ser chamado pelo Atoms
+### Arquivo: `src/pages/Debug.tsx`
 
-### 3. Fluxo Completo
+- Componente React com estado para cada teste (idle, loading, success, error)
+- Usa `supabase` client para ler `pre_call_context` diretamente
+- Usa `fetch` para chamar as edge functions
+- Cards com `pre` tags para exibir JSON formatado
+- Botao "Executar Todos" no topo
 
-```text
-Frontend (CheckIn.tsx)
-   |
-   | envia variables + userId
-   v
-atoms-session (edge function)
-   |
-   | 1. Salva variables na tabela pre_call_context
-   | 2. Cria webcall na API do Atoms
-   | 3. Retorna token + host
-   v
-Atoms Platform
-   |
-   | Antes de iniciar a conversa, chama Pre Call API
-   v
-atoms-precall (edge function)
-   |
-   | Busca variables da tabela pre_call_context
-   | Retorna { variables: { patient_name, medications, ... } }
-   v
-Agente Clara
-   |
-   | Usa as variaveis no prompt: "Ola {{patient_name}}..."
-```
+### Arquivo: `src/App.tsx`
 
-## Resumo
+- Import do componente Debug
+- Adicionar `<Route path="/debug" element={<Debug />} />`
 
-O problema nao e no codigo -- e na **configuracao do Workflow do agente no dashboard do Atoms**. O Pre Call API Node precisa estar conectado ao Start Node com o mapeamento de variaveis correto. Sem isso, o Atoms nunca chama o webhook.
+### Dependencias
 
-Depois que voce configurar o Workflow, eu removo o `sendTextMessage` (que nao funciona) e restauro o salvamento de contexto no banco.
-
+Nenhuma nova dependencia necessaria. Usa componentes UI existentes (Card, Button, Badge).
