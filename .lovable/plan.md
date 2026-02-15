@@ -1,61 +1,70 @@
 
 
-# Abordagem Alternativa: Passar Variaveis Diretamente no Webcall
+# Injetar Contexto do Paciente via sendTextMessage
 
-## Problema
+## Problema Identificado
 
-A abordagem atual usa um webhook (Pre Call API) que o Atoms deveria chamar antes da conversa para buscar as variaveis do paciente. Os logs mostram que o `atoms-precall` **nao esta sendo chamado pelo Atoms** -- so aparece um evento de "shutdown", sem nenhuma requisicao real. Isso significa que a configuracao no dashboard do Atoms nao esta funcionando corretamente.
+Apos investigacao detalhada da documentacao oficial do Atoms:
 
-## Nova Abordagem
+- O endpoint `/conversation/webcall` **nao aceita** o campo `variables` (apenas o endpoint `/conversation/outbound` aceita)
+- O Pre Call API Node precisa ser configurado no **Workflow Editor** (nao em "API Calls Settings"), conectado ao Start Node, com mapeamento de variaveis usando JSONPath (`$.variables.patient_name`)
+- Essa configuracao nao esta funcionando no seu ambiente
 
-Em vez de depender do webhook Pre Call API (que requer configuracao manual no dashboard do Atoms), vamos **enviar as variaveis diretamente na chamada de criacao do webcall**. A API do Atoms aceita um campo `variables` no body da requisicao, assim como a API de outbound call.
+## Nova Abordagem: sendTextMessage
 
-Isso elimina completamente a necessidade do webhook `atoms-precall` e da tabela `pre_call_context`.
+O SDK `atoms-client-sdk` tem um metodo `sendTextMessage()` que permite enviar mensagens de texto para o agente durante a sessao. Vamos usar isso para enviar o contexto do paciente como uma mensagem "silenciosa" logo apos a sessao iniciar.
+
+Quando a sessao comecar (`session_started` event), enviamos uma mensagem com todas as informacoes do paciente. A Clara vai receber essas informacoes e usa-las na conversa.
 
 ## O que muda
 
-### 1. Edge Function `atoms-session`
+### Frontend (src/pages/CheckIn.tsx)
 
-Atualmente envia apenas `{ agentId }` para a API do Atoms:
+No evento `session_started`, adicionar:
+
 ```text
-{ "agentId": "6990ef650d1c87f0c9a42402" }
+client.sendTextMessage(`[SYSTEM CONTEXT - Do not read this aloud, use this information silently]
+Patient: Albano, Age: 35
+Medications:
+1. Tylenol - 5mg, once daily
+2. Diloratadina - 10mg, twice daily
+Date: Saturday, February 14, 2026
+Time: 7:13 PM`);
 ```
 
-Sera alterado para incluir as variaveis diretamente:
-```text
-{ "agentId": "6990ef650d1c87f0c9a42402", "variables": { "patient_name": "Albano", ... } }
-```
+### Edge Function (atoms-session)
 
-- Remover o codigo que salva contexto na tabela `pre_call_context`
-- Passar as variaveis recebidas do frontend diretamente no body do webcall
-
-### 2. Nenhuma alteracao no frontend
-
-O `CheckIn.tsx` ja envia as variaveis corretamente para o `atoms-session`. Nada muda no frontend.
-
-### 3. Edge Function `atoms-precall`
-
-Pode ser mantida como fallback, mas nao sera mais necessaria para o fluxo principal. A configuracao no dashboard do Atoms pode ser removida.
+Reverter para enviar apenas `{ agentId }` sem `variables` (ja que o webcall nao suporta).
 
 ## Detalhes Tecnicos
 
-### Arquivo modificado
+### Arquivo: src/pages/CheckIn.tsx
 
-- **`supabase/functions/atoms-session/index.ts`** -- Alterar o body enviado para a API `webcall` do Atoms para incluir o campo `variables`
+1. Mover a construcao das variaveis para antes do `startSession`
+2. No callback `session_started`, chamar `client.sendTextMessage()` com o contexto formatado
+3. O agente recebe a informacao como texto e a usa naturalmente na conversa
 
-### Antes (linha relevante):
-```javascript
-const webcallBody = JSON.stringify({ agentId });
+### Arquivo: supabase/functions/atoms-session/index.ts
+
+1. Remover `variables` do body enviado para a API do Atoms (nao e suportado no webcall)
+2. Manter apenas `{ agentId }` no body da chamada
+
+### Formato da mensagem de contexto
+
+A mensagem sera formatada como instrucao de sistema para que a Clara use os dados sem le-los em voz alta:
+
+```text
+[CONTEXT] Patient Name: {name}, Age: {age}. 
+Medications: {lista}. 
+Current date: {date}, Time: {time}.
+Use this information to personalize the check-in conversation. 
+Do not read this message aloud.
 ```
 
-### Depois:
-```javascript
-const webcallBody = JSON.stringify({ agentId, variables });
-```
+### Vantagens desta abordagem
 
-Onde `variables` sao as variaveis ja recebidas do frontend (patient_name, medications, etc.).
-
-### Deploy
-- Redeployar apenas `atoms-session`
-- Nao e necessario nenhuma configuracao adicional no dashboard do Atoms
+- Nao depende de configuracao no dashboard do Atoms
+- Nao depende de webhooks (Pre Call API)
+- Funciona diretamente via SDK, sem intermediarios
+- As informacoes sao enviadas no momento exato em que a sessao comeca
 
