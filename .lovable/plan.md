@@ -1,49 +1,43 @@
 
-# Criar Página de Teste TTS
 
-## Objetivo
+# Corrigir TTS: Usar `output_format: "mp3"` em vez de PCM
 
-Criar uma página isolada `/tts-test` para testar apenas a conversão de texto em áudio, sem depender do fluxo completo de check-in. Isso vai ajudar a identificar se o problema é na API TTS, na conversão base64, ou no playback.
+## Problema Identificado
 
-## O que será criado
+A documentacao oficial da API Lightning v3.1 mostra que o parametro correto para controlar o formato de saida e `output_format`, com as opcoes: `pcm` (padrao), `mp3`, `wav`, `mulaw`.
 
-### 1. Nova edge function `tts-test/index.ts`
+O codigo atual usa `add_wav_header: true`, que e um parametro do modelo Lightning antigo (deprecated). O Lightning v3.1 ignora esse parametro e retorna PCM cru (sem header), o que explica por que todos os metodos de playback falham.
 
-Uma função simplificada que recebe apenas texto e retorna o áudio base64. Chama somente o TTS (Lightning v3.1), sem STT nem LLM. Também retornará metadados do áudio (tamanho em bytes, primeiros bytes do header) para debug.
+## Solucao
 
-### 2. Nova página `src/pages/TtsTest.tsx`
+Usar `output_format: "mp3"` -- o formato MP3 e suportado nativamente por todos os browsers no elemento `<audio>`, sem necessidade de parsing manual de headers.
 
-Página simples com:
-- Campo de texto para digitar a frase
-- Botão "Gerar Áudio"
-- Painel de debug mostrando:
-  - Tamanho do base64 recebido
-  - Primeiros bytes do WAV header (RIFF signature, sample rate, bits per sample)
-  - Status de cada etapa do playback
-- Três métodos de playback lado a lado para comparar:
-  1. **Método A** -- `<audio>` tag com data URL (`data:audio/wav;base64,...`)
-  2. **Método B** -- `<audio>` tag com Blob URL
-  3. **Método C** -- Manual PCM decode (o método atual)
-- Cada método mostra se funcionou ou o erro
+## Alteracoes
 
-### 3. Rota em `src/App.tsx`
+### 1. Edge function `supabase/functions/tts-test/index.ts`
 
-Adicionar rota `/tts-test` (sem proteção, para facilitar o teste).
+- Remover `add_wav_header: true`
+- Adicionar `output_format: "mp3"`
+- Atualizar o Content-Type do debug para refletir MP3
 
-## Detalhes Técnicos
+### 2. Edge function `supabase/functions/voice-chat/index.ts`
 
-### Edge function `tts-test`
+- Mesma correcao: remover `add_wav_header: true`, adicionar `output_format: "mp3"`
 
-```
-POST /tts-test
-Body: { "text": "Olá, como você está?" }
-Response: { 
-  "audioBase64": "...", 
-  "audioSizeBytes": 48044,
-  "headerBytes": "52494646..." (primeiros 44 bytes em hex)
-}
-```
+### 3. Pagina de teste `src/pages/TtsTest.tsx`
 
-### Página de teste
+- Atualizar o Metodo A para usar `data:audio/mp3;base64,...` em vez de `audio/wav`
+- Atualizar o Metodo B para criar Blob com tipo `audio/mp3`
+- Simplificar o Metodo C (PCM manual) -- manter como fallback mas nao sera mais necessario
 
-A página testará os 3 métodos de playback e mostrará logs visuais na tela para cada um, facilitando o diagnóstico do problema sem precisar abrir o console.
+### 4. Pagina de check-in `src/pages/CheckIn.tsx`
+
+- Simplificar `playAudio` para usar `<audio>` com Blob URL de MP3, removendo toda a logica de parsing manual de WAV/PCM que nao sera mais necessaria
+
+## Por que isso resolve
+
+- MP3 e universalmente suportado em todos os browsers
+- Nao precisa de parsing manual de headers
+- O `<audio>` element toca MP3 diretamente sem nenhum workaround
+- A API ja suporta esse formato nativamente
+
