@@ -1,40 +1,38 @@
 
 
-# Exibir Transcrição da Conversa Durante a Ligação
+# Exibir Informacoes do Paciente na Tela de Preparacao
 
-## O que será feito
+## O que sera feito
 
-Adicionar um painel de transcrição em tempo real na tela de chamada ativa, mostrando o que a Clara (agente) está dizendo durante a ligação. O SDK do Atoms já possui um evento `transcript` que envia o texto em tempo real.
+Na tela de "Preparando..." (estado `preparing`), alem dos passos de progresso, exibir um card com as informacoes do paciente que estao sendo enviadas para o agente Clara. Cada item tera um indicador visual mostrando se ja foi enviado e se o agente tem acesso.
 
-## Como vai funcionar
+## Mudancas em `src/pages/CheckIn.tsx`
 
-- Durante a chamada ativa, um painel de chat aparecerá abaixo do avatar da Clara
-- Cada mensagem da Clara aparecerá como uma bolha de texto com timestamp
-- O painel fará scroll automático para a mensagem mais recente
-- O painel será discreto e não atrapalhará o botão de encerrar chamada
+### 1. Armazenar as variaveis preparadas em um estado
 
-## Mudanças técnicas
+Adicionar um estado `preparedVariables` que guarda os dados coletados (nome, idade, medicamentos) para exibir na tela de preparacao. Preenchido durante a Fase 1 do `handleAnswer`.
 
-### Arquivo: `src/pages/CheckIn.tsx`
+### 2. Atualizar a tela "preparing"
 
-1. **Novo estado para transcrições**
-   - Adicionar `transcripts` como array de `{ text, timestamp, sender }` no state
-   - Adicionar estado `isAgentTalking` para feedback visual
+Abaixo dos passos de progresso, adicionar um card semi-transparente mostrando:
 
-2. **Escutar eventos do SDK**
-   - Após `client.startSession()`, registrar listener para o evento `transcript` que captura `{ text, timestamp }`
-   - Registrar listeners para `agent_start_talking` e `agent_stop_talking` para indicador visual
-   - Cada transcript recebido será adicionado ao array de mensagens
+- **Nome do paciente**: ex. "Albano"
+- **Idade**: ex. "35 anos"
+- **Medicamentos**: lista com nome e dosagem de cada medicamento
+- **Status de envio**: icone de check verde + texto "Dados enviados ao agente" quando `prepStep` atingir `connecting` ou `done`, ou um loader enquanto ainda esta enviando
 
-3. **UI da transcrição na tela "active"**
-   - Abaixo do timer e acima do botão de encerrar, adicionar um `ScrollArea` com as mensagens
-   - Cada mensagem exibida como bolha com o texto e horário
-   - Indicador visual quando a Clara está falando (animação no avatar ou label "Falando...")
-   - Auto-scroll para a última mensagem
+O card so aparece apos o passo "profile" ser concluido (quando os dados ja foram coletados). Quando os dados forem salvos no banco (passo "context" concluido), o card mostra confirmacao visual de que o agente tem acesso.
 
-4. **Passar transcrições para o resumo**
-   - Quando a chamada terminar, o campo "summary" será pré-preenchido com a transcrição completa da conversa, facilitando o salvamento
+### Detalhes visuais
 
-### Nenhuma mudança no backend
-Todas as mudanças são apenas no frontend, usando eventos já disponíveis no SDK.
+- Card com fundo `bg-primary-foreground/10` e `backdrop-blur`
+- Titulo "Dados do paciente"
+- Cada campo como linha: label em opacidade reduzida, valor em destaque
+- Medicamentos como lista numerada compacta
+- Rodape do card com badge de status:
+  - Durante envio: Loader + "Enviando para Clara..."
+  - Apos envio: Check verde + "Clara tem acesso a estes dados"
+
+### Nenhuma mudanca no backend
+Apenas alteracoes visuais no frontend usando dados ja disponiveis no fluxo.
 
