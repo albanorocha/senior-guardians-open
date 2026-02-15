@@ -9,11 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, MicOff } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
 type Mood = 'happy' | 'neutral' | 'confused' | 'distressed';
+type MicStatus = 'listening' | 'speaking' | 'processing' | 'clara-speaking';
 
 interface TranscriptMessage {
   text: string;
@@ -28,6 +29,10 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
   { value: 'distressed', emoji: '😟', label: 'Distressed' },
 ];
 
+const SILENCE_THRESHOLD = 15;
+const SILENCE_TIMEOUT_MS = 1500;
+const VAD_CHECK_INTERVAL_MS = 100;
+
 const CheckIn = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -41,9 +46,9 @@ const CheckIn = () => {
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [micStatus, setMicStatus] = useState<MicStatus>('listening');
   const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [patientContext, setPatientContext] = useState<{
     patientName: string;
@@ -56,15 +61,30 @@ const CheckIn = () => {
   const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const vadIntervalRef = useRef<ReturnType<typeof setInterval>>();
+  const silenceStartRef = useRef<number | null>(null);
+  const isSpeakingRef = useRef(false);
+  const isRecordingRef = useRef(false);
+  const isPlayingRef = useRef(false);
+  const isProcessingRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       clearInterval(timerRef.current);
+      clearInterval(vadIntervalRef.current);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
-      mediaRecorderRef.current?.stream?.getTracks().forEach(t => t.stop());
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      audioContextRef.current?.close();
     };
   }, []);
 
@@ -96,6 +116,15 @@ const CheckIn = () => {
     return () => clearInterval(timerRef.current);
   }, [callState, callStart]);
 
+  // Update micStatus based on state
+  useEffect(() => {
+    if (isPlaying) {
+      setMicStatus('clara-speaking');
+    } else if (isProcessing) {
+      setMicStatus('processing');
+    }
+  }, [isPlaying, isProcessing]);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -104,11 +133,12 @@ const CheckIn = () => {
 
   const handleEndCall = () => {
     clearInterval(timerRef.current);
+    clearInterval(vadIntervalRef.current);
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    mediaRecorderRef.current?.stream?.getTracks().forEach(t => t.stop());
-    setIsRecording(false);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    audioContextRef.current?.close();
     setIsPlaying(false);
 
     // Pre-fill summary with transcript
@@ -125,6 +155,91 @@ const CheckIn = () => {
 
     setCallState('summary');
   };
+
+  // --- VAD: Start/stop recording based on voice activity ---
+  const startVADRecording = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream || isRecordingRef.current) return;
+
+    chunksRef.current = [];
+    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    mediaRecorderRef.current = recorder;
+    const recordStartTime = Date.now();
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const duration = Date.now() - recordStartTime;
+      if (duration < 500 || chunksRef.current.length === 0) return;
+
+      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      if (blob.size > 100) {
+        sendAudioToVoiceChat(blob);
+      }
+    };
+
+    recorder.start(250);
+    isRecordingRef.current = true;
+    setMicStatus('speaking');
+  }, []);
+
+  const stopVADRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    isRecordingRef.current = false;
+  }, []);
+
+  const startVADMonitoring = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    vadIntervalRef.current = setInterval(() => {
+      // Don't process while Clara is speaking or processing
+      if (isPlayingRef.current || isProcessingRef.current) {
+        // If we were recording, stop
+        if (isRecordingRef.current) {
+          stopVADRecording();
+        }
+        silenceStartRef.current = null;
+        isSpeakingRef.current = false;
+        return;
+      }
+
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
+
+      if (avg > SILENCE_THRESHOLD) {
+        // Voice detected
+        silenceStartRef.current = null;
+        if (!isSpeakingRef.current) {
+          isSpeakingRef.current = true;
+          startVADRecording();
+        }
+      } else {
+        // Silence
+        if (isSpeakingRef.current) {
+          if (!silenceStartRef.current) {
+            silenceStartRef.current = Date.now();
+          } else if (Date.now() - silenceStartRef.current > SILENCE_TIMEOUT_MS) {
+            // Silence long enough — send recording
+            isSpeakingRef.current = false;
+            silenceStartRef.current = null;
+            stopVADRecording();
+          }
+        } else {
+          // Not speaking, show listening
+          if (!isPlayingRef.current && !isProcessingRef.current) {
+            setMicStatus('listening');
+          }
+        }
+      }
+    }, VAD_CHECK_INTERVAL_MS);
+  }, [startVADRecording, stopVADRecording]);
 
   const handleAnswer = async () => {
     setCallState('preparing');
@@ -154,13 +269,31 @@ const CheckIn = () => {
       };
       setPatientContext(ctx);
 
+      // --- AUDIO UNLOCK: Create and unlock Audio element during user gesture ---
+      const audio = new Audio();
+      // Play a silent audio to unlock the element for future use
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      await audio.play().catch(() => {});
+      audioRef.current = audio;
+
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      mediaRecorderRef.current = recorder;
+      streamRef.current = stream;
+
+      // Set up AudioContext + AnalyserNode for VAD
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
       setCallStart(new Date());
       setCallState('active');
+
+      // Start VAD monitoring
+      startVADMonitoring();
 
       // Send an initial greeting by calling the LLM with a "start" message
       await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx);
@@ -189,7 +322,6 @@ const CheckIn = () => {
     setIsProcessing(true);
 
     try {
-      // For the initial greeting, we send text directly instead of audio
       const res = await fetch(`${supabaseUrl}/functions/v1/voice-chat`, {
         method: 'POST',
         headers: {
@@ -284,54 +416,20 @@ const CheckIn = () => {
 
   const playAudio = (base64: string) => {
     setIsPlaying(true);
-    const audio = new Audio(`data:audio/wav;base64,${base64}`);
-    audioRef.current = audio;
+    // Reuse the pre-unlocked Audio element
+    const audio = audioRef.current;
+    if (!audio) {
+      // Fallback: create new one (may be blocked)
+      const newAudio = new Audio(`data:audio/wav;base64,${base64}`);
+      newAudio.onended = () => setIsPlaying(false);
+      newAudio.onerror = () => setIsPlaying(false);
+      newAudio.play().catch(() => setIsPlaying(false));
+      return;
+    }
     audio.onended = () => setIsPlaying(false);
     audio.onerror = () => setIsPlaying(false);
+    audio.src = `data:audio/wav;base64,${base64}`;
     audio.play().catch(() => setIsPlaying(false));
-  };
-
-  const startRecording = () => {
-    if (!mediaRecorderRef.current || isProcessing || isPlaying) return;
-
-    chunksRef.current = [];
-    
-    // Create a fresh recorder each time since stop() makes it inactive
-    const stream = mediaRecorderRef.current.stream;
-    const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-    mediaRecorderRef.current = recorder;
-    
-    const recordStartTime = Date.now();
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = () => {
-      const duration = Date.now() - recordStartTime;
-      console.log('[CheckIn] Recording duration:', duration, 'ms, chunks:', chunksRef.current.length);
-      
-      if (duration < 500) {
-        toast({ title: 'Too short', description: 'Hold the button longer while speaking.', variant: 'destructive' });
-        return;
-      }
-      
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      console.log('[CheckIn] Audio blob size:', blob.size, 'bytes');
-      if (blob.size > 100) {
-        sendAudioToVoiceChat(blob);
-      }
-    };
-
-    recorder.start(250); // collect data every 250ms
-    setIsRecording(true);
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
   };
 
   const handleSave = async () => {
@@ -368,6 +466,14 @@ const CheckIn = () => {
     toast({ title: 'Check-in saved!' });
     setSaving(false);
     navigate('/dashboard');
+  };
+
+  // Mic status label
+  const micStatusLabel = {
+    'listening': 'Listening...',
+    'speaking': 'You\'re speaking...',
+    'processing': 'Processing...',
+    'clara-speaking': 'Clara is speaking...',
   };
 
   // Audio visualizer bars
@@ -449,16 +555,6 @@ const CheckIn = () => {
             </div>
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-senior-lg font-bold">Clara</h2>
-              {isPlaying && (
-                <span className="flex items-center gap-1 text-sm opacity-80">
-                  <Mic className="h-3 w-3" /> Speaking...
-                </span>
-              )}
-              {isProcessing && (
-                <span className="flex items-center gap-1 text-sm opacity-80">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
-                </span>
-              )}
             </div>
             {isPlaying ? (
               <AudioVisualizer />
@@ -492,41 +588,49 @@ const CheckIn = () => {
               </div>
             </div>
 
-            {/* Controls */}
-            <div className="flex items-center gap-6">
-              {/* Hold to talk button */}
-              <Button
-                onPointerDown={startRecording}
-                onPointerUp={stopRecording}
-                onPointerLeave={stopRecording}
-                disabled={isProcessing || isPlaying}
-                size="lg"
-                className={`w-20 h-20 rounded-full p-0 transition-all ${
-                  isRecording
-                    ? 'bg-red-500 hover:bg-red-600 scale-110'
-                    : 'bg-primary-foreground/20 hover:bg-primary-foreground/30'
-                } disabled:opacity-40`}
-              >
-                {isRecording ? (
-                  <MicOff className="h-8 w-8" />
-                ) : (
-                  <Mic className="h-8 w-8" />
-                )}
-              </Button>
+            {/* Controls: Mic status indicator + End call */}
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex items-center gap-6">
+                {/* Mic status indicator */}
+                <div className="relative flex items-center justify-center">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
+                    micStatus === 'speaking'
+                      ? 'bg-destructive/80'
+                      : micStatus === 'listening'
+                      ? 'bg-primary-foreground/20'
+                      : 'bg-primary-foreground/10'
+                  }`}>
+                    {micStatus === 'processing' ? (
+                      <Loader2 className="h-7 w-7 animate-spin" />
+                    ) : (
+                      <Mic className="h-7 w-7" />
+                    )}
+                  </div>
+                  {micStatus === 'speaking' && (
+                    <>
+                      <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-destructive/60 animate-ping" />
+                      <div className="absolute -inset-2 w-20 h-20 rounded-full border border-destructive/30 animate-pulse" />
+                    </>
+                  )}
+                  {micStatus === 'listening' && (
+                    <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-primary-foreground/30 animate-pulse" />
+                  )}
+                </div>
 
-              {/* End call */}
-              <Button
-                onClick={handleEndCall}
-                variant="destructive"
-                size="lg"
-                className="w-16 h-16 rounded-full p-0"
-              >
-                <PhoneOff className="h-7 w-7" />
-              </Button>
+                {/* End call */}
+                <Button
+                  onClick={handleEndCall}
+                  variant="destructive"
+                  size="lg"
+                  className="w-16 h-16 rounded-full p-0"
+                >
+                  <PhoneOff className="h-7 w-7" />
+                </Button>
+              </div>
+              <p className="text-xs opacity-60">
+                {micStatusLabel[micStatus]}
+              </p>
             </div>
-            <p className="text-xs opacity-60 mt-2">
-              {isRecording ? 'Release to send' : isProcessing ? 'Processing...' : isPlaying ? 'Clara is speaking...' : 'Hold to talk'}
-            </p>
           </motion.div>
         )}
 
