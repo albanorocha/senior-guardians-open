@@ -1,55 +1,103 @@
 
 
-# Painel de Testes Visuais - Fluxo Completo de Chamadas
+# Reestruturar o Fluxo do Check-In: Enviar Dados Antes da Ligacao
 
-Melhorar a pagina `/debug` existente para ser um painel de diagnostico completo que testa visualmente cada etapa do fluxo, desde a criacao da sessao ate a resposta do pre-call.
+## Problema Atual
 
-## Testes que serao adicionados
+O fluxo atual faz tudo em um unico passo dentro do `handleAnswer`:
+1. Clica em "Atender"
+2. Muda para estado "active" imediatamente
+3. Busca perfil do paciente
+4. Busca medicamentos
+5. Chama `atoms-session` (que salva dados E cria a webcall ao mesmo tempo)
+6. Inicia a sessao de voz
 
-### Teste 1 - Dados no Banco (ja existe, sera mantido)
-Consulta a tabela `pre_call_context` e exibe os registros mais recentes.
+O problema: como tudo acontece junto, existe uma corrida entre salvar os dados e o Atoms chamar o webhook `atoms-precall`. Se o Atoms chamar o webhook antes dos dados serem salvos, o agente Clara nao recebe as informacoes do paciente.
 
-### Teste 2 - Chamar atoms-precall (ja existe, sera mantido)
-Chama o webhook diretamente e verifica o formato da resposta.
+## Solucao: Fluxo em Duas Etapas
 
-### Teste 3 - Simular atoms-session completo (novo)
-Chama a edge function `atoms-session` com dados de teste (agentId, variables, userId falso), simulando exatamente o que o frontend faz ao iniciar uma chamada. Mostra:
-- Se os dados foram salvos no banco
-- Se a API do Atoms respondeu (ou erro de token/agentId)
-- Tempo total da operacao
+Separar o processo em duas fases claras:
 
-### Teste 4 - Fluxo Completo Encadeado (novo, substitui o antigo teste 3)
-Executa tudo em sequencia:
-1. Chama `atoms-session` com dados de teste para salvar contexto
-2. Imediatamente chama `atoms-precall` para verificar se retorna os dados salvos
-3. Mostra cada etapa com status individual
-4. Limpa os dados de teste ao final
+**Fase 1 - Preparar Dados** (novo estado "preparing"):
+- Ao clicar em "Atender", mostra tela de "Preparando..."
+- Busca perfil e medicamentos
+- Salva os dados no `pre_call_context` via uma chamada dedicada
+- Confirma que os dados foram salvos com sucesso
 
-### Teste 5 - Verificar Logs do Pre Call (novo)
-Mostra a URL do webhook e instrucoes para verificar se o Atoms esta chamando o endpoint. Inclui botao para chamar o precall repetidamente e mostrar o historico de respostas.
+**Fase 2 - Estabelecer Ligacao** (so apos Fase 1 completar):
+- Cria a webcall via `atoms-session`
+- Inicia a sessao de voz
+- Muda para estado "active"
 
-### Secao de Configuracao (ja existe, sera melhorada)
-- Webhook URL com botao de copiar
-- Comando curl com botao de copiar
-- Formato JSON esperado
-- Checklist visual do que precisa ser configurado no dashboard do Atoms
+## Mudancas Necessarias
 
-## Mudancas visuais
-- Indicadores de status maiores e mais claros (icones coloridos)
-- Timeline visual mostrando qual etapa do fluxo falhou
-- Botao "Copiar" ao lado de URLs e comandos
-- Secao de "Diagnostico" que analisa os resultados e sugere o que fazer
+### 1. Edge Function `atoms-session` - Separar responsabilidades
 
-## Detalhes Tecnicos
+Criar uma nova rota ou modificar `atoms-session` para aceitar dois modos:
+- **Modo 1 - Salvar contexto**: recebe `variables` e `userId`, salva no `pre_call_context`, retorna confirmacao
+- **Modo 2 - Criar webcall**: recebe `agentId`, cria a sessao no Atoms, retorna token
 
-### Arquivo: `src/pages/Debug.tsx`
-Reescrever o componente com:
-- 5 testes independentes (os 2 existentes + 3 novos)
-- Botao "Executar Todos" mantido
-- Funcao de copiar para clipboard em URLs e comandos
-- Teste 3 chama `atoms-session` via fetch (mesmo endpoint que o CheckIn usa)
-- Teste 4 encadeia session -> precall e mostra resultado de cada etapa
-- Secao de diagnostico automatico que analisa os resultados e diz onde o problema esta
+Na pratica, o mais simples e criar uma nova edge function `atoms-save-context` dedicada a salvar os dados, e manter `atoms-session` apenas para criar a webcall.
 
-### Nenhum outro arquivo sera modificado
-A rota `/debug` ja esta registrada no App.tsx.
+### 2. Nova Edge Function `atoms-save-context`
+
+Arquivo: `supabase/functions/atoms-save-context/index.ts`
+- Recebe `{ variables, userId }`
+- Deleta registros antigos do `pre_call_context`
+- Insere novo registro
+- Retorna `{ success: true }` com confirmacao
+
+### 3. Simplificar `atoms-session`
+
+Arquivo: `supabase/functions/atoms-session/index.ts`
+- Remover a logica de salvar no `pre_call_context` (agora feita pela nova funcao)
+- Manter apenas a criacao da webcall no Atoms API
+
+### 4. Reestruturar `CheckIn.tsx`
+
+Arquivo: `src/pages/CheckIn.tsx`
+
+- Adicionar novo estado `preparing` ao `CallState`: `'incoming' | 'preparing' | 'active' | 'summary'`
+- Nova tela visual para o estado "preparing" mostrando progresso (ex: "Preparando seus dados...", "Dados enviados!", "Conectando com Clara...")
+- O fluxo do `handleAnswer` passa a ser:
+
+```
+1. setCallState('preparing')
+2. Buscar perfil e medicamentos
+3. Chamar atoms-save-context → salvar dados
+4. Aguardar confirmacao de sucesso
+5. Chamar atoms-session → criar webcall
+6. Iniciar sessao de voz
+7. setCallState('active')
+```
+
+- Se qualquer etapa falhar, volta para `incoming` com mensagem de erro
+
+### 5. Configuracao do config.toml
+
+Adicionar entrada para a nova edge function com `verify_jwt = false` (necessario pois o Atoms chama sem JWT):
+
+```toml
+[functions.atoms-save-context]
+verify_jwt = false
+```
+
+## Tela de "Preparando" (Estado preparing)
+
+Visual similar ao estado "incoming" mas com:
+- Icone de Clara com animacao de carregamento
+- Texto "Preparando seus dados..."
+- Indicadores de progresso para cada etapa:
+  - "Carregando perfil..." → checkmark
+  - "Enviando medicamentos..." → checkmark
+  - "Conectando com Clara..." → animacao
+
+## Resultado Esperado
+
+Quando o usuario clicar em "Atender":
+1. Ve uma tela de preparacao com progresso
+2. Dados do paciente sao salvos no banco PRIMEIRO
+3. So depois a ligacao e criada
+4. Quando o Atoms chamar o webhook `atoms-precall`, os dados ja estarao disponiveis
+5. Clara recebe nome, idade e medicamentos corretamente
+
