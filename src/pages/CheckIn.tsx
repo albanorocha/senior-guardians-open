@@ -10,10 +10,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, PhoneOff, PhoneIncoming, X, Save } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Check, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type CallState = 'incoming' | 'active' | 'summary';
+type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
 type Mood = 'happy' | 'neutral' | 'confused' | 'distressed';
 
 const moodOptions: { value: Mood; emoji: string; label: string }[] = [
@@ -36,6 +36,7 @@ const CheckIn = () => {
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [prepStep, setPrepStep] = useState<'profile' | 'context' | 'connecting' | 'done'>('profile');
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const atomsClientRef = useRef<AtomsClient | null>(null);
 
@@ -92,8 +93,8 @@ const CheckIn = () => {
   const handleAnswer = async () => {
     if (connecting) return;
     setConnecting(true);
-    setCallStart(new Date());
-    setCallState('active');
+    setPrepStep('profile');
+    setCallState('preparing');
 
     try {
       // Stop any previous session
@@ -101,6 +102,8 @@ const CheckIn = () => {
         try { atomsClientRef.current.stopSession(); } catch {}
         atomsClientRef.current = null;
       }
+
+      // === PHASE 1: Prepare data ===
 
       // Fetch patient profile
       let patientName = 'Patient';
@@ -136,13 +139,32 @@ const CheckIn = () => {
         current_time: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
       };
 
-      console.log('[CheckIn] Variables being sent:', JSON.stringify(variables));
-      console.log('[CheckIn] UserId:', user?.id);
+      console.log('[CheckIn] Variables prepared:', JSON.stringify(variables));
 
+      // Save context FIRST via dedicated function
+      setPrepStep('context');
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      const requestBody = { agentId: '6990ef650d1c87f0c9a42402', variables, userId: user?.id };
-      console.log('[CheckIn] Request body to atoms-session:', JSON.stringify(requestBody));
+
+      const saveRes = await fetch(`${supabaseUrl}/functions/v1/atoms-save-context`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ variables, userId: user?.id }),
+      });
+
+      const saveData = await saveRes.json();
+      if (!saveRes.ok || !saveData.success) {
+        throw new Error(saveData.error || 'Failed to save context');
+      }
+      console.log('[CheckIn] Context saved successfully');
+
+      // === PHASE 2: Create call (data is already persisted) ===
+      setPrepStep('connecting');
+      setCallStart(new Date());
 
       const res = await fetch(`${supabaseUrl}/functions/v1/atoms-session`, {
         method: 'POST',
@@ -151,12 +173,11 @@ const CheckIn = () => {
           'apikey': supabaseKey,
           'Authorization': `Bearer ${supabaseKey}`,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({ agentId: '6990ef650d1c87f0c9a42402' }),
       });
 
       const data = await res.json();
-      console.log('[CheckIn] atoms-session response status:', res.status);
-      console.log('[CheckIn] atoms-session response data:', JSON.stringify(data));
+      console.log('[CheckIn] atoms-session response:', res.status);
 
       if (!res.ok) {
         throw new Error(data.error || 'Failed to start session');
@@ -168,6 +189,7 @@ const CheckIn = () => {
       client.on('session_started', () => {
         console.log('Atoms voice session started');
         setConnecting(false);
+        setCallState('active');
       });
 
       client.on('session_ended', () => {
@@ -241,6 +263,19 @@ const CheckIn = () => {
     </div>
   );
 
+  const PrepStep = ({ label, done, active }: { label: string; done: boolean; active: boolean }) => (
+    <div className={`flex items-center gap-3 text-primary-foreground transition-opacity ${!done && !active ? 'opacity-40' : 'opacity-100'}`}>
+      {done ? (
+        <Check className="h-5 w-5 text-green-300" />
+      ) : active ? (
+        <Loader2 className="h-5 w-5 animate-spin" />
+      ) : (
+        <div className="h-5 w-5 rounded-full border-2 border-primary-foreground/40" />
+      )}
+      <span className="text-senior-base">{label}</span>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary via-primary/90 to-accent">
       <AnimatePresence mode="wait">
@@ -276,6 +311,24 @@ const CheckIn = () => {
               >
                 <Phone className="h-7 w-7" />
               </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* PREPARING */}
+        {callState === 'preparing' && (
+          <motion.div key="preparing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center min-h-screen px-4 text-primary-foreground">
+            <div className="relative mb-8">
+              <div className="w-28 h-28 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-3xl font-bold">
+                C
+              </div>
+              <div className="absolute inset-0 w-28 h-28 rounded-full border-4 border-primary-foreground/30 animate-spin" style={{ borderTopColor: 'transparent', animationDuration: '1.5s' }} />
+            </div>
+            <h1 className="text-senior-2xl font-bold mb-6">Preparando...</h1>
+            <div className="space-y-4 w-full max-w-xs">
+              <PrepStep label="Carregando perfil" done={prepStep !== 'profile'} active={prepStep === 'profile'} />
+              <PrepStep label="Enviando dados" done={prepStep === 'connecting' || prepStep === 'done'} active={prepStep === 'context'} />
+              <PrepStep label="Conectando com Clara" done={prepStep === 'done'} active={prepStep === 'connecting'} />
             </div>
           </motion.div>
         )}
