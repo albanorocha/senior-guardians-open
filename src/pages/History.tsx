@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { History as HistoryIcon, ChevronDown, Clock, AlertTriangle, Bell } from 'lucide-react';
+import { History as HistoryIcon, ChevronDown, Clock, AlertTriangle, Bell, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 
@@ -118,7 +118,15 @@ const History = () => {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <div className="px-6 pb-4 border-t border-border pt-3 space-y-3">
-                          {ci.summary && <p className="text-sm text-muted-foreground">{ci.summary}</p>}
+                          {/* Conversation Notes */}
+                          {ci.summary && (
+                            <div className="bg-muted/50 rounded-lg p-3 space-y-1">
+                              <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                                <MessageSquare className="h-3.5 w-3.5" /> Conversation Notes
+                              </p>
+                              <p className="text-sm leading-relaxed">{ci.summary}</p>
+                            </div>
+                          )}
                           
                           {/* Medication responses */}
                           {responses[ci.id]?.map((r: any) => (
