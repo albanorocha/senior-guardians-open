@@ -112,6 +112,67 @@ const CheckIn = () => {
     return () => resetCallState();
   }, [resetCallState]);
 
+  // Ringtone effect — synthesized phone ring using Web Audio API
+  useEffect(() => {
+    if (callState !== 'incoming') return;
+
+    let audioCtx: AudioContext | null = null;
+    let ringInterval: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const startRingtone = () => {
+      audioCtx = new AudioContext();
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0;
+      gainNode.connect(audioCtx.destination);
+
+      const osc1 = audioCtx.createOscillator();
+      osc1.frequency.value = 440;
+      osc1.type = 'sine';
+      osc1.connect(gainNode);
+      osc1.start();
+
+      const osc2 = audioCtx.createOscillator();
+      osc2.frequency.value = 480;
+      osc2.type = 'sine';
+      osc2.connect(gainNode);
+      osc2.start();
+
+      let ringing = false;
+      const toggle = () => {
+        if (stopped) return;
+        ringing = !ringing;
+        gainNode.gain.setTargetAtTime(ringing ? 0.15 : 0, audioCtx!.currentTime, 0.02);
+      };
+
+      // Start with ring on
+      toggle();
+      // Pattern: 1s ring, 2s silence (toggle every 1s on, 2s off)
+      let count = 0;
+      ringInterval = setInterval(() => {
+        count++;
+        if (count % 3 === 1) {
+          // ring on
+          gainNode.gain.setTargetAtTime(0.15, audioCtx!.currentTime, 0.02);
+        } else if (count % 3 === 2) {
+          // ring off after 1s
+          gainNode.gain.setTargetAtTime(0, audioCtx!.currentTime, 0.02);
+        }
+        // count % 3 === 0: still silent (2nd second of silence)
+      }, 1000);
+    };
+
+    startRingtone();
+
+    return () => {
+      stopped = true;
+      if (ringInterval) clearInterval(ringInterval);
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [callState]);
+
   // Auto-scroll transcripts
   useEffect(() => {
     if (scrollRef.current) {
@@ -605,8 +666,17 @@ const CheckIn = () => {
                 )}
                 {transcripts.map((t, i) => (
                   <div key={i} className={`flex flex-col ${t.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`rounded-lg px-3 py-2 max-w-[90%] ${t.sender === 'user' ? 'bg-primary-foreground/25' : 'bg-primary-foreground/15'}`}>
-                      <p className="text-xs opacity-60 mb-0.5">{t.sender === 'user' ? 'You' : 'Clara'}</p>
+                    <div className={`px-3 py-2 max-w-[90%] ${
+                      t.sender === 'user'
+                        ? 'bg-white/25 rounded-lg rounded-br-none'
+                        : 'bg-accent/30 rounded-lg rounded-bl-none border-l-2 border-secondary'
+                    }`}>
+                      {t.sender === 'agent' && (
+                        <p className="text-xs font-semibold text-secondary mb-0.5">Clara</p>
+                      )}
+                      {t.sender === 'user' && (
+                        <p className="text-xs opacity-60 mb-0.5">You</p>
+                      )}
                       <p className="text-sm leading-relaxed">{t.text}</p>
                     </div>
                     <span className="text-[10px] opacity-40 mt-0.5 mx-1">
@@ -653,7 +723,7 @@ const CheckIn = () => {
                     micStatus === 'speaking'
                       ? 'bg-destructive/80'
                       : micStatus === 'listening'
-                      ? 'bg-primary-foreground/20'
+                      ? 'bg-secondary/80'
                       : 'bg-primary-foreground/10'
                   }`}>
                     {micStatus === 'processing' ? (
