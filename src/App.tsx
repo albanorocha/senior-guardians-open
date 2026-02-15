@@ -12,6 +12,7 @@ import Medications from "./pages/Medications";
 import CheckIn from "./pages/CheckIn";
 import History from "./pages/History";
 import NotFound from "./pages/NotFound";
+import TtsTest from "./pages/TtsTest";
 
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/medications" element={<ProtectedRoute><Medications /></ProtectedRoute>} />
             <Route path="/check-in" element={<ProtectedRoute><CheckIn /></ProtectedRoute>} />
             <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+            <Route path="/tts-test" element={<TtsTest />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
