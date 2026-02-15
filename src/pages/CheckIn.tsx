@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AtomsClient } from 'atoms-client-sdk';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -9,12 +9,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, PhoneOff, PhoneIncoming, X, Save, Check, Loader2 } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Check, Loader2, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
 type Mood = 'happy' | 'neutral' | 'confused' | 'distressed';
+
+interface TranscriptMessage {
+  text: string;
+  timestamp: number;
+  sender: 'agent' | 'system';
+}
 
 const moodOptions: { value: Mood; emoji: string; label: string }[] = [
   { value: 'happy', emoji: '😊', label: 'Happy' },
@@ -37,8 +44,11 @@ const CheckIn = () => {
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [prepStep, setPrepStep] = useState<'profile' | 'context' | 'connecting' | 'done'>('profile');
+  const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
+  const [isAgentTalking, setIsAgentTalking] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const atomsClientRef = useRef<AtomsClient | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -50,6 +60,13 @@ const CheckIn = () => {
       }
     };
   }, []);
+
+  // Auto-scroll transcripts
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [transcripts]);
 
   useEffect(() => {
     if (!user) return;
@@ -87,6 +104,19 @@ const CheckIn = () => {
       atomsClientRef.current = null;
     }
     setConnecting(false);
+    setIsAgentTalking(false);
+
+    // Pre-fill summary with transcript
+    if (transcripts.length > 0) {
+      const transcriptText = transcripts
+        .map(t => {
+          const time = new Date(t.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          return `[${time}] Clara: ${t.text}`;
+        })
+        .join('\n');
+      setSummary(transcriptText);
+    }
+
     setCallState('summary');
   };
 
@@ -95,6 +125,8 @@ const CheckIn = () => {
     setConnecting(true);
     setPrepStep('profile');
     setCallState('preparing');
+    setTranscripts([]);
+    setIsAgentTalking(false);
 
     try {
       // Stop any previous session
@@ -196,6 +228,17 @@ const CheckIn = () => {
         console.log('Atoms voice session ended by agent');
         handleEndCall();
       });
+
+      client.on('transcript', (data: { text: string; timestamp: number }) => {
+        setTranscripts(prev => [...prev, {
+          text: data.text,
+          timestamp: data.timestamp || Date.now(),
+          sender: 'agent',
+        }]);
+      });
+
+      client.on('agent_start_talking', () => setIsAgentTalking(true));
+      client.on('agent_stop_talking', () => setIsAgentTalking(false));
 
       await client.startSession({
         accessToken: data.data.token,
@@ -335,26 +378,57 @@ const CheckIn = () => {
 
         {/* ACTIVE CALL */}
         {callState === 'active' && (
-          <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center min-h-screen px-4 text-primary-foreground">
-            <div className="w-24 h-24 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-3xl font-bold mb-4">
+          <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center min-h-screen px-4 pt-8 pb-4 text-primary-foreground">
+            <div className="relative w-20 h-20 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-2xl font-bold mb-2">
               C
+              {isAgentTalking && (
+                <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-primary-foreground/50 animate-pulse" />
+              )}
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="text-senior-lg font-bold">Clara</h2>
+              {isAgentTalking && (
+                <span className="flex items-center gap-1 text-sm opacity-80">
+                  <Mic className="h-3 w-3" /> Falando...
+                </span>
+              )}
             </div>
             {connecting ? (
               <p className="text-senior-base opacity-80 animate-pulse">Conectando...</p>
             ) : (
               <AudioVisualizer />
             )}
-            <h2 className="text-senior-xl font-bold mt-4">Clara</h2>
-            <p className="text-senior-2xl font-mono mt-2">{formatTime(elapsed)}</p>
-            <p className="text-senior-sm opacity-70 mt-2 max-w-sm text-center">
-              {connecting ? 'Establishing voice connection...' : 'Voice check-in in progress. Speak naturally with Clara about your medications.'}
-            </p>
+            <p className="text-senior-lg font-mono mt-1">{formatTime(elapsed)}</p>
+
+            {/* Transcript panel */}
+            <div className="w-full max-w-md flex-1 mt-4 mb-4 min-h-0">
+              <div
+                ref={scrollRef}
+                className="h-[40vh] overflow-y-auto rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-3 space-y-2"
+              >
+                {transcripts.length === 0 && (
+                  <p className="text-sm opacity-50 text-center mt-8">
+                    A transcrição aparecerá aqui...
+                  </p>
+                )}
+                {transcripts.map((t, i) => (
+                  <div key={i} className="flex flex-col">
+                    <div className="bg-primary-foreground/15 rounded-lg px-3 py-2 max-w-[90%]">
+                      <p className="text-sm leading-relaxed">{t.text}</p>
+                    </div>
+                    <span className="text-[10px] opacity-40 mt-0.5 ml-1">
+                      {new Date(t.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <Button
               onClick={handleEndCall}
               variant="destructive"
               size="lg"
-              className="w-16 h-16 rounded-full p-0 mt-12"
+              className="w-16 h-16 rounded-full p-0"
             >
               <PhoneOff className="h-7 w-7" />
             </Button>
