@@ -7,7 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { ImpersonationProvider } from "@/hooks/useImpersonation";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Login from "./pages/Login";
-import Signup from "./pages/Signup";
+
 import Dashboard from "./pages/Dashboard";
 import Medications from "./pages/Medications";
 import CheckIn from "./pages/CheckIn";
@@ -30,7 +30,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
+              <Route path="/signup" element={<Navigate to="/login" replace />} />
               
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/medications" element={<ProtectedRoute><Medications /></ProtectedRoute>} />
