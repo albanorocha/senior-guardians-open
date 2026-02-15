@@ -32,7 +32,7 @@ const emptyResult = (): TestResult => ({ status: 'idle', steps: [] });
 
 const copyToClipboard = (text: string) => {
   navigator.clipboard.writeText(text);
-  toast.success('Copiado!');
+  toast.success('Copied!');
 };
 
 const StatusIcon = ({ status }: { status: TestStatus }) => {
@@ -47,9 +47,9 @@ const StatusIcon = ({ status }: { status: TestStatus }) => {
 const StatusBadge = ({ status }: { status: TestStatus }) => {
   const map: Record<TestStatus, { label: string; variant: 'default' | 'destructive' | 'secondary' | 'outline' }> = {
     success: { label: '✅ OK', variant: 'default' },
-    error: { label: '❌ Erro', variant: 'destructive' },
-    loading: { label: '⏳ Testando...', variant: 'secondary' },
-    idle: { label: '⏳ Aguardando', variant: 'outline' },
+    error: { label: '❌ Error', variant: 'destructive' },
+    loading: { label: '⏳ Testing...', variant: 'secondary' },
+    idle: { label: '⏳ Waiting', variant: 'outline' },
   };
   const { label, variant } = map[status];
   return <Badge variant={variant}>{label}</Badge>;
@@ -98,7 +98,7 @@ const ResultCard = ({ title, desc, result, onRun, children }: {
     <CardContent className="space-y-3">
       <div className="flex items-center gap-3">
         <Button onClick={onRun} disabled={result.status === 'loading'} size="sm">
-          <Play className="h-4 w-4 mr-1" /> Executar
+          <Play className="h-4 w-4 mr-1" /> Run
         </Button>
         {result.time !== undefined && (
           <span className="text-xs text-muted-foreground">{result.time}ms total</span>
@@ -120,7 +120,7 @@ const CopyBlock = ({ label, value }: { label: string; value: string }) => (
     <div className="flex items-center justify-between mb-1">
       <p className="text-sm font-medium">{label}</p>
       <Button variant="ghost" size="sm" onClick={() => copyToClipboard(value)}>
-        <Copy className="h-3 w-3 mr-1" /> Copiar
+        <Copy className="h-3 w-3 mr-1" /> Copy
       </Button>
     </div>
     <pre className="text-xs bg-muted p-3 rounded-md overflow-auto whitespace-pre-wrap break-all">{value}</pre>
@@ -138,7 +138,7 @@ const Debug = () => {
 
   // ── Test 1: Database Check ──
   const runTest1 = useCallback(async () => {
-    setTest1({ status: 'loading', steps: [{ label: 'Consultando pre_call_context...', status: 'loading' }] });
+    setTest1({ status: 'loading', steps: [{ label: 'Querying pre_call_context...', status: 'loading' }] });
     const start = Date.now();
     try {
       const { data, error } = await supabase
@@ -151,11 +151,11 @@ const Debug = () => {
       setTest1({
         status: ok ? 'success' : 'error',
         time: Date.now() - start,
-        message: ok ? `${data.length} registro(s) encontrado(s)` : 'Tabela vazia',
+        message: ok ? `${data.length} record(s) found` : 'Table empty',
         steps: [{
-          label: 'Consulta pre_call_context',
+          label: 'Query pre_call_context',
           status: ok ? 'success' : 'error',
-          message: ok ? `${data.length} registro(s)` : 'Nenhum registro',
+          message: ok ? `${data.length} record(s)` : 'No records',
           data: ok ? data : undefined,
           time: Date.now() - start,
         }],
@@ -163,14 +163,14 @@ const Debug = () => {
     } catch (e: any) {
       setTest1({
         status: 'error', time: Date.now() - start, message: e.message,
-        steps: [{ label: 'Consulta pre_call_context', status: 'error', message: e.message, time: Date.now() - start }],
+        steps: [{ label: 'Query pre_call_context', status: 'error', message: e.message, time: Date.now() - start }],
       });
     }
   }, []);
 
   // ── Test 2: Direct Precall ──
   const runTest2 = useCallback(async () => {
-    setTest2({ status: 'loading', steps: [{ label: 'Chamando atoms-precall...', status: 'loading' }] });
+    setTest2({ status: 'loading', steps: [{ label: 'Calling atoms-precall...', status: 'loading' }] });
     const start = Date.now();
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/atoms-precall`, {
@@ -185,8 +185,8 @@ const Debug = () => {
         status: res.ok && hasVars ? 'success' : 'error',
         time: Date.now() - start,
         message: hasData
-          ? `Formato correto! Chaves: ${Object.keys(json.variables).join(', ')}`
-          : hasVars ? 'Formato correto mas variables está vazio' : `Status ${res.status} - formato inesperado`,
+          ? `Correct format! Keys: ${Object.keys(json.variables).join(', ')}`
+          : hasVars ? 'Correct format but variables is empty' : `Status ${res.status} - unexpected format`,
         steps: [{
           label: 'POST atoms-precall',
           status: res.ok && hasVars ? 'success' : 'error',
@@ -208,18 +208,18 @@ const Debug = () => {
     setTest3({
       status: 'loading',
       steps: [
-        { label: 'Chamando atoms-session com dados de teste...', status: 'loading' },
-        { label: 'Verificando dados no banco...', status: 'idle' },
+        { label: 'Calling atoms-session with test data...', status: 'loading' },
+        { label: 'Verifying data in database...', status: 'idle' },
       ],
     });
     const start = Date.now();
     try {
       const testVars = {
-        patient_name: 'Debug Teste',
+        patient_name: 'Debug Test',
         patient_age: 88,
-        medications: 'Losartana 50mg (manhã), Metformina 500mg (noite)',
-        current_date: new Date().toLocaleDateString('pt-BR'),
-        current_time: new Date().toLocaleTimeString('pt-BR'),
+        medications: 'Losartan 50mg (morning), Metformin 500mg (night)',
+        current_date: new Date().toLocaleDateString('en-US'),
+        current_time: new Date().toLocaleTimeString('en-US'),
       };
 
       const sessionStart = Date.now();
@@ -234,7 +234,7 @@ const Debug = () => {
       const sessionStep: StepResult = {
         label: 'POST atoms-session',
         status: res.ok ? 'success' : 'error',
-        message: res.ok ? `HTTP ${res.status} - Sessão criada com sucesso!` : `HTTP ${res.status} - ${json.error || 'Erro'}`,
+        message: res.ok ? `HTTP ${res.status} - Session created successfully!` : `HTTP ${res.status} - ${json.error || 'Error'}`,
         data: json,
         time: sessionTime,
       };
@@ -252,9 +252,9 @@ const Debug = () => {
       const dbOk = !dbError && dbData && dbData.length > 0;
 
       const dbStep: StepResult = {
-        label: 'Verificar dados no banco',
+        label: 'Verify data in database',
         status: dbOk ? 'success' : 'error',
-        message: dbOk ? 'Contexto salvo com sucesso!' : dbError?.message || 'Dados não encontrados (RLS pode bloquear leitura anônima)',
+        message: dbOk ? 'Context saved successfully!' : dbError?.message || 'Data not found (RLS may block anonymous reads)',
         data: dbOk ? dbData[0] : undefined,
         time: dbTime,
       };
@@ -264,8 +264,8 @@ const Debug = () => {
         status: overallOk ? 'success' : 'error',
         time: Date.now() - start,
         message: dbOk
-          ? 'Dados salvos no banco com sucesso!'
-          : 'atoms-session respondeu, mas dados podem não ser visíveis via client (RLS)',
+          ? 'Data saved to database successfully!'
+          : 'atoms-session responded, but data may not be visible via client (RLS)',
         steps: [sessionStep, dbStep],
       });
     } catch (e: any) {
@@ -281,10 +281,10 @@ const Debug = () => {
     setTest4({
       status: 'loading',
       steps: [
-        { label: '1. Salvando contexto via atoms-session...', status: 'loading' },
-        { label: '2. Buscando via atoms-precall...', status: 'idle' },
-        { label: '3. Verificando dados retornados...', status: 'idle' },
-        { label: '4. Limpando dados de teste...', status: 'idle' },
+        { label: '1. Saving context via atoms-session...', status: 'loading' },
+        { label: '2. Fetching via atoms-precall...', status: 'idle' },
+        { label: '3. Verifying returned data...', status: 'idle' },
+        { label: '4. Cleaning up test data...', status: 'idle' },
       ],
     });
     const start = Date.now();
@@ -298,13 +298,13 @@ const Debug = () => {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_KEY}`, 'apikey': SUPABASE_KEY },
         body: JSON.stringify({
           agentId: REAL_AGENT_ID,
-          variables: { patient_name: 'Fluxo Completo', patient_age: 77, medications: 'Aspirina 100mg', current_date: new Date().toLocaleDateString('pt-BR'), current_time: new Date().toLocaleTimeString('pt-BR') },
+          variables: { patient_name: 'Full Flow', patient_age: 77, medications: 'Aspirin 100mg', current_date: new Date().toLocaleDateString('en-US'), current_time: new Date().toLocaleTimeString('en-US') },
           userId: TEST_USER_ID,
         }),
       });
       const sessionJson = await sessionRes.json();
       steps.push({
-        label: '1. Salvar contexto (atoms-session)',
+        label: '1. Save context (atoms-session)',
         status: 'success',
         message: `HTTP ${sessionRes.status}`,
         data: sessionJson,
@@ -322,7 +322,7 @@ const Debug = () => {
       });
       const precallJson = await precallRes.json();
       steps.push({
-        label: '2. Buscar via atoms-precall',
+        label: '2. Fetch via atoms-precall',
         status: precallRes.ok ? 'success' : 'error',
         message: `HTTP ${precallRes.status}`,
         data: precallJson,
@@ -332,11 +332,11 @@ const Debug = () => {
       setTest4(prev => ({ ...prev, steps: [...steps, ...prev.steps.slice(steps.length)] }));
 
       // Step 3: Verify
-      const match = precallJson?.variables?.patient_name === 'Fluxo Completo';
+      const match = precallJson?.variables?.patient_name === 'Full Flow';
       steps.push({
-        label: '3. Verificar dados retornados',
+        label: '3. Verify returned data',
         status: match ? 'success' : 'error',
-        message: match ? 'patient_name = "Fluxo Completo" ✓' : `Esperava "Fluxo Completo", recebeu "${precallJson?.variables?.patient_name || 'vazio'}"`,
+        message: match ? 'patient_name = "Full Flow" ✓' : `Expected "Full Flow", got "${precallJson?.variables?.patient_name || 'empty'}"`,
       });
 
       setTest4(prev => ({ ...prev, steps: [...steps, ...prev.steps.slice(steps.length)] }));
@@ -344,19 +344,19 @@ const Debug = () => {
       // Step 4: Cleanup (via edge function since RLS blocks client)
       // We'll just note that cleanup would need service role
       steps.push({
-        label: '4. Limpeza (dados de teste)',
+        label: '4. Cleanup (test data)',
         status: 'success',
-        message: 'Dados serão sobrescritos no próximo teste',
+        message: 'Data will be overwritten on next test',
       });
 
       setTest4({
         status: match ? 'success' : 'error',
         time: Date.now() - start,
-        message: match ? '🎉 Fluxo completo funcionando!' : 'Fluxo falhou - verifique os passos acima',
+        message: match ? '🎉 Full flow working!' : 'Flow failed - check steps above',
         steps,
       });
     } catch (e: any) {
-      steps.push({ label: 'Erro', status: 'error', message: e.message });
+      steps.push({ label: 'Error', status: 'error', message: e.message });
       setTest4({ status: 'error', time: Date.now() - start, message: e.message, steps });
     }
   }, []);
@@ -370,9 +370,9 @@ const Debug = () => {
         body: JSON.stringify({}),
       });
       const json = await res.json();
-      setPrecallHistory(prev => [{ time: new Date().toLocaleTimeString('pt-BR'), data: json }, ...prev].slice(0, 10));
+      setPrecallHistory(prev => [{ time: new Date().toLocaleTimeString('en-US'), data: json }, ...prev].slice(0, 10));
     } catch (e: any) {
-      setPrecallHistory(prev => [{ time: new Date().toLocaleTimeString('pt-BR'), data: { error: e.message } }, ...prev].slice(0, 10));
+      setPrecallHistory(prev => [{ time: new Date().toLocaleTimeString('en-US'), data: { error: e.message } }, ...prev].slice(0, 10));
     }
   }, []);
 
@@ -382,11 +382,11 @@ const Debug = () => {
   const getDiagnosis = () => {
     const results = [test1, test2, test3, test4];
     if (results.every(r => r.status === 'idle')) return null;
-    if (results.every(r => r.status === 'success')) return { type: 'success' as const, msg: '🎉 Tudo funcionando! O fluxo está completo. Configure o Pre Call API no dashboard do Atoms com a URL abaixo.' };
-    if (test2.status === 'error') return { type: 'error' as const, msg: '⚠️ A edge function atoms-precall não está respondendo. Verifique se foi deployada corretamente.' };
-    if (test4.status === 'success') return { type: 'success' as const, msg: '✅ O fluxo de dados está funcionando. Falta apenas configurar o webhook no dashboard do Atoms.' };
-    if (test3.status === 'success' && test4.status === 'error') return { type: 'error' as const, msg: '⚠️ Sessão salva mas precall não retornou os dados. Verifique a lógica da edge function.' };
-    return { type: 'error' as const, msg: '⚠️ Alguns testes falharam. Execute todos para um diagnóstico completo.' };
+    if (results.every(r => r.status === 'success')) return { type: 'success' as const, msg: '🎉 Everything working! The flow is complete. Configure the Pre Call API in the Atoms dashboard with the URL below.' };
+    if (test2.status === 'error') return { type: 'error' as const, msg: '⚠️ The atoms-precall edge function is not responding. Check if it was deployed correctly.' };
+    if (test4.status === 'success') return { type: 'success' as const, msg: '✅ The data flow is working. You just need to configure the webhook in the Atoms dashboard.' };
+    if (test3.status === 'success' && test4.status === 'error') return { type: 'error' as const, msg: '⚠️ Session saved but precall did not return the data. Check the edge function logic.' };
+    return { type: 'error' as const, msg: '⚠️ Some tests failed. Run all tests for a complete diagnosis.' };
   };
 
   const diagnosis = getDiagnosis();
@@ -396,9 +396,9 @@ const Debug = () => {
   return (
     <div className="min-h-screen bg-background p-4 md:p-8 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">🔍 Debug - Fluxo Completo</h1>
+        <h1 className="text-2xl font-bold">🔍 Debug - Full Flow</h1>
         <Button onClick={runAll} size="lg">
-          <PlayCircle className="h-5 w-5 mr-2" /> Executar Todos
+          <PlayCircle className="h-5 w-5 mr-2" /> Run All
         </Button>
       </div>
 
@@ -414,19 +414,19 @@ const Debug = () => {
         </Card>
       )}
 
-      <ResultCard title="1. Dados no Banco" desc="Consulta os últimos registros em pre_call_context" result={test1} onRun={runTest1} />
-      <ResultCard title="2. Chamar atoms-precall" desc="Chama o webhook diretamente e verifica o formato da resposta" result={test2} onRun={runTest2} />
-      <ResultCard title="3. Simular atoms-session" desc="Envia dados de teste para atoms-session e verifica se foram salvos no banco" result={test3} onRun={runTest3} />
-      <ResultCard title="4. Fluxo Completo Encadeado" desc="Session → Banco → Precall em sequência para validar todo o pipeline" result={test4} onRun={runTest4} />
+      <ResultCard title="1. Database Data" desc="Query the latest records in pre_call_context" result={test1} onRun={runTest1} />
+      <ResultCard title="2. Call atoms-precall" desc="Call the webhook directly and verify the response format" result={test2} onRun={runTest2} />
+      <ResultCard title="3. Simulate atoms-session" desc="Send test data to atoms-session and verify it was saved to the database" result={test3} onRun={runTest3} />
+      <ResultCard title="4. Full Chained Flow" desc="Session → Database → Precall in sequence to validate the entire pipeline" result={test4} onRun={runTest4} />
 
       {/* Test 5: Precall History */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">5. Monitor Pre Call</CardTitle>
-            <Badge variant="outline">{precallHistory.length} chamada(s)</Badge>
+             <Badge variant="outline">{precallHistory.length} call(s)</Badge>
           </div>
-          <CardDescription>Chame o precall repetidamente para monitorar respostas</CardDescription>
+          <CardDescription>Call precall repeatedly to monitor responses</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button onClick={runPrecallPing} size="sm">
@@ -448,34 +448,34 @@ const Debug = () => {
       {/* Configuration Section */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">📋 Configuração do Atoms</CardTitle>
-          <CardDescription>URLs e comandos para configurar no dashboard do Atoms</CardDescription>
+          <CardTitle className="text-lg">📋 Atoms Configuration</CardTitle>
+          <CardDescription>URLs and commands to configure in the Atoms dashboard</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <CopyBlock label="Webhook URL (Pre Call API):" value={webhookUrl} />
-          <CopyBlock label="Comando curl para teste:" value={curlCmd} />
+          <CopyBlock label="Curl command for testing:" value={curlCmd} />
           <CopyBlock
-            label="Formato esperado da resposta:"
+            label="Expected response format:"
             value={JSON.stringify({
               variables: {
-                patient_name: "Nome do Paciente",
+                patient_name: "Patient Name",
                 patient_age: 35,
-                medications: "Medicamento 1, Medicamento 2",
-                current_date: "15/02/2026",
-                current_time: "14:30",
+                medications: "Medication 1, Medication 2",
+                current_date: "02/15/2026",
+                current_time: "2:30 PM",
               },
             }, null, 2)}
           />
 
           {/* Checklist */}
           <div>
-            <p className="text-sm font-medium mb-2">✅ Checklist de configuração:</p>
+            <p className="text-sm font-medium mb-2">✅ Configuration checklist:</p>
             <ul className="text-sm space-y-1 text-muted-foreground">
-              <li>☐ Configurar Pre Call API Node no Atoms com a URL acima</li>
-              <li>☐ Método: POST</li>
+              <li>☐ Configure Pre Call API Node in Atoms with the URL above</li>
+              <li>☐ Method: POST</li>
               <li>☐ Headers: Content-Type: application/json</li>
-              <li>☐ Verificar que o agente está usando o Pre Call no fluxo</li>
-              <li>☐ Testar uma chamada real e verificar os logs</li>
+              <li>☐ Verify the agent is using Pre Call in the flow</li>
+              <li>☐ Test a real call and check the logs</li>
             </ul>
           </div>
         </CardContent>
