@@ -1,61 +1,74 @@
 
 
-# Implementar Pre Call API - Contexto do Paciente para Clara
+# Adicionar Logs Detalhados para Debug do Pre Call API
 
-## O que aconteceu
+## Problema Atual
 
-O plano anterior foi aprovado mas nenhuma mudanca foi aplicada. O codigo atual ainda tenta enviar `variables` diretamente no endpoint `/conversation/webcall`, que ignora esse campo.
+Os logs mostram que a funcao `atoms-precall` **foi chamada** pelo Atoms (recebeu body `{}`) e **retornou as variaveis corretamente**. Isso significa que a integracao tecnica esta funcionando. O problema provavel e a **configuracao de mapeamento de variaveis** no dashboard do Atoms.
 
 ## O que sera feito
 
-### 1. Criar tabela `pre_call_context`
+### 1. Adicionar logs detalhados no frontend (CheckIn.tsx)
 
-Tabela temporaria para guardar o contexto do paciente entre o inicio da sessao e a chamada do Pre Call API do Atoms.
+- Logar as variaveis enviadas para `atoms-session`
+- Logar a resposta completa do `atoms-session`
+- Logar erros com detalhes completos
 
-- `id` (uuid, PK)
-- `user_id` (uuid, unique) - para fazer upsert
-- `variables` (jsonb) - dados do paciente
-- `created_at` (timestamp)
-- RLS habilitado, sem policies publicas (acesso apenas via service_role nas edge functions)
+### 2. Adicionar logs detalhados no `atoms-session`
 
-### 2. Atualizar edge function `atoms-session`
+- Logar o body completo recebido do frontend
+- Logar a resposta completa da API do Atoms (webcall)
+- Logar o status HTTP da resposta do Atoms
 
-Antes de criar a webcall:
-- Receber `user_id` e `variables` do frontend
-- Usar o Supabase client com service_role para salvar/atualizar o contexto na tabela `pre_call_context` (upsert por user_id)
-- Criar a webcall normalmente enviando apenas `{ agentId }` (sem variables)
-- Adicionar console.log para debug
+### 3. Adicionar logs detalhados e headers no `atoms-precall`
 
-### 3. Criar nova edge function `atoms-precall`
+- Logar todos os headers recebidos (para entender como o Atoms chama)
+- Logar o metodo HTTP usado
+- Logar a URL completa
+- Logar a query completa ao banco
 
-Webhook que o Atoms chamara automaticamente antes de iniciar a conversa:
-- Receber a requisicao do Atoms
-- Logar o body completo recebido (para debug, pois nao sabemos exatamente o que o Atoms envia)
-- Buscar o contexto mais recente da tabela `pre_call_context`
-- Retornar as variaveis no formato `{ variables: { patient_name, medications, ... } }`
-- Configurar `verify_jwt = false` no config.toml (o Atoms nao envia JWT)
+### 4. Verificacao de configuracao no Atoms
 
-### 4. Atualizar `CheckIn.tsx`
+Apos os logs, voce precisa verificar no dashboard do Atoms:
 
-- Enviar `user_id` no body da chamada para `atoms-session`:
-  ```text
-  body: JSON.stringify({ agentId: '...', variables, userId: user.id })
-  ```
+1. Na configuracao do Pre Call API, alem da URL, **e necessario mapear as variaveis da resposta**
+2. Cada variavel do agente (ex: `patient_name`) precisa ser mapeada para o campo correspondente na resposta da API
+3. Exemplo de mapeamento:
+   - Variavel `patient_name` -> Path: `$.variables.patient_name`
+   - Variavel `medications` -> Path: `$.variables.medications`
+   - Variavel `current_date` -> Path: `$.variables.current_date`
+   - Variavel `current_time` -> Path: `$.variables.current_time`
+   - Variavel `patient_age` -> Path: `$.variables.patient_age`
 
-## Configuracao manual no Atoms (feita por voce)
+## Detalhes Tecnicos
 
-Apos a implementacao, voce precisa configurar no dashboard do Atoms (https://app.smallest.ai):
+### Arquivos modificados
 
-1. Abrir o agente Clara
-2. Adicionar um Pre Call API Node
-3. URL: `https://rlbratdaqtdpbifkceds.supabase.co/functions/v1/atoms-precall`
-4. Metodo: POST
-5. Headers: `apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` (chave anonima)
+- **`src/pages/CheckIn.tsx`** - Adicionar `console.log` antes e depois da chamada ao `atoms-session`
+- **`supabase/functions/atoms-session/index.ts`** - Logar body recebido, resposta completa do Atoms API, e status
+- **`supabase/functions/atoms-precall/index.ts`** - Logar headers, metodo, e detalhes da query ao banco
 
-## Arquivos
+### Exemplo de logs que serao adicionados
 
-- **Nova migracao SQL** - criar tabela `pre_call_context`
-- **Novo:** `supabase/functions/atoms-precall/index.ts`
-- **Modificado:** `supabase/functions/atoms-session/index.ts`
-- **Modificado:** `src/pages/CheckIn.tsx` - enviar userId
+**Frontend:**
+```text
+[CheckIn] Variables: { patient_name: "Albano", ... }
+[CheckIn] atoms-session response: { data: { token: "...", host: "..." } }
+```
+
+**atoms-session:**
+```text
+[atoms-session] Received body: { agentId: "...", variables: {...}, userId: "..." }
+[atoms-session] Atoms API response status: 200
+[atoms-session] Atoms API response body: { data: { token: "...", host: "..." } }
+```
+
+**atoms-precall:**
+```text
+[atoms-precall] Method: POST
+[atoms-precall] Headers: { apikey: "...", content-type: "..." }
+[atoms-precall] Received body: {}
+[atoms-precall] DB query result: { variables: { patient_name: "Albano", ... } }
+[atoms-precall] Returning: { variables: { patient_name: "Albano", ... } }
+```
 
