@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic } from 'lucide-react';
+import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
@@ -29,9 +29,11 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
   { value: 'distressed', emoji: '😟', label: 'Distressed' },
 ];
 
-const SILENCE_THRESHOLD = 15;
-const SILENCE_TIMEOUT_MS = 1500;
+const SILENCE_THRESHOLD = 25;
+const SILENCE_TIMEOUT_MS = 2000;
 const VAD_CHECK_INTERVAL_MS = 100;
+const MIN_BLOB_SIZE = 5000;
+const MIN_RECORDING_DURATION_MS = 800;
 
 const CheckIn = () => {
   const { user } = useAuth();
@@ -50,6 +52,7 @@ const CheckIn = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [micStatus, setMicStatus] = useState<MicStatus>('listening');
   const [conversationHistory, setConversationHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
+  const [textInput, setTextInput] = useState('');
   const [patientContext, setPatientContext] = useState<{
     patientName: string;
     patientAge: number | string | null;
@@ -172,10 +175,10 @@ const CheckIn = () => {
 
     recorder.onstop = () => {
       const duration = Date.now() - recordStartTime;
-      if (duration < 500 || chunksRef.current.length === 0) return;
+      if (duration < MIN_RECORDING_DURATION_MS || chunksRef.current.length === 0) return;
 
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      if (blob.size > 100) {
+      if (blob.size > MIN_BLOB_SIZE) {
         sendAudioToVoiceChat(blob);
       }
     };
@@ -385,7 +388,14 @@ const CheckIn = () => {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Voice chat failed');
+        // Silently ignore empty transcription errors (background noise)
+        const errMsg = data.error || 'Voice chat failed';
+        if (errMsg.includes('Could not transcribe') || errMsg.includes('No speech') || errMsg.includes('empty')) {
+          console.log('[CheckIn] Empty transcription, resuming listening');
+          setIsProcessing(false);
+          return;
+        }
+        throw new Error(errMsg);
       }
 
       // Add user transcript
@@ -416,20 +426,36 @@ const CheckIn = () => {
 
   const playAudio = (base64: string) => {
     setIsPlaying(true);
-    // Reuse the pre-unlocked Audio element
-    const audio = audioRef.current;
-    if (!audio) {
-      // Fallback: create new one (may be blocked)
-      const newAudio = new Audio(`data:audio/wav;base64,${base64}`);
-      newAudio.onended = () => setIsPlaying(false);
-      newAudio.onerror = () => setIsPlaying(false);
-      newAudio.play().catch(() => setIsPlaying(false));
-      return;
+    try {
+      // Convert base64 to Blob to avoid data URI size limits
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+
+      const audio = audioRef.current || new Audio();
+      if (!audioRef.current) audioRef.current = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setIsPlaying(false);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setIsPlaying(false);
+      };
+      audio.src = url;
+      audio.play().catch(() => {
+        URL.revokeObjectURL(url);
+        setIsPlaying(false);
+      });
+    } catch (err) {
+      console.error('[CheckIn] Audio playback error:', err);
+      setIsPlaying(false);
     }
-    audio.onended = () => setIsPlaying(false);
-    audio.onerror = () => setIsPlaying(false);
-    audio.src = `data:audio/wav;base64,${base64}`;
-    audio.play().catch(() => setIsPlaying(false));
   };
 
   const handleSave = async () => {
@@ -563,15 +589,15 @@ const CheckIn = () => {
             )}
             <p className="text-senior-lg font-mono mt-1">{formatTime(elapsed)}</p>
 
-            {/* Transcript panel */}
-            <div className="w-full max-w-md flex-1 mt-4 mb-4 min-h-0">
+            {/* Chat panel with text input */}
+            <div className="w-full max-w-md flex-1 mt-4 mb-4 min-h-0 flex flex-col">
               <div
                 ref={scrollRef}
-                className="h-[35vh] overflow-y-auto rounded-xl bg-primary-foreground/10 backdrop-blur-sm p-3 space-y-2"
+                className="flex-1 h-[30vh] overflow-y-auto rounded-t-xl bg-primary-foreground/10 backdrop-blur-sm p-3 space-y-2"
               >
                 {transcripts.length === 0 && (
                   <p className="text-sm opacity-50 text-center mt-8">
-                    Transcript will appear here...
+                    Chat will appear here...
                   </p>
                 )}
                 {transcripts.map((t, i) => (
@@ -586,6 +612,33 @@ const CheckIn = () => {
                   </div>
                 ))}
               </div>
+              {/* Text input bar */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!textInput.trim() || isProcessing) return;
+                  const msg = textInput.trim();
+                  setTextInput('');
+                  sendToVoiceChat(msg);
+                }}
+                className="flex gap-2 rounded-b-xl bg-primary-foreground/15 backdrop-blur-sm p-2"
+              >
+                <Input
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Type a message..."
+                  disabled={isProcessing || isPlaying}
+                  className="flex-1 bg-primary-foreground/20 border-0 text-primary-foreground placeholder:text-primary-foreground/50 focus-visible:ring-primary-foreground/30"
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!textInput.trim() || isProcessing || isPlaying}
+                  className="bg-primary-foreground/20 hover:bg-primary-foreground/30 text-primary-foreground shrink-0"
+                >
+                  {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </form>
             </div>
 
             {/* Controls: Mic status indicator + End call */}
