@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Phone, PhoneOff, PhoneIncoming, X, Save, Loader2, Mic, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type CallState = 'incoming' | 'preparing' | 'active' | 'summary';
+type CallState = 'incoming' | 'active' | 'summary';
 type Mood = 'happy' | 'neutral' | 'confused' | 'distressed';
 type MicStatus = 'listening' | 'speaking' | 'processing' | 'clara-speaking';
 
@@ -260,8 +260,10 @@ const CheckIn = () => {
     }, VAD_CHECK_INTERVAL_MS);
   }, [startVADRecording, stopVADRecording]);
 
+  const [connecting, setConnecting] = useState(false);
+
   const handleAnswer = async () => {
-    setCallState('preparing');
+    setConnecting(true);
     setTranscripts([]);
     setConversationHistory([]);
 
@@ -318,12 +320,13 @@ const CheckIn = () => {
       await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx, []);
     } catch (err: any) {
       console.error('Failed to start voice session:', err);
-      setCallState('incoming');
       toast({
         title: 'Failed to start call',
         description: err.message?.includes('Permission') ? 'Microphone access is required.' : err.message,
         variant: 'destructive',
       });
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -572,30 +575,15 @@ const CheckIn = () => {
               <Button
                 onClick={handleAnswer}
                 size="lg"
+                disabled={connecting}
                 className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground"
               >
-                <Phone className="h-7 w-7" />
+                {connecting ? <Loader2 className="h-7 w-7 animate-spin" /> : <Phone className="h-7 w-7" />}
               </Button>
             </div>
           </motion.div>
         )}
 
-        {/* PREPARING */}
-        {callState === 'preparing' && (
-          <motion.div key="preparing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center min-h-screen px-4 text-primary-foreground">
-            <div className="relative mb-8">
-              <div className="w-28 h-28 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-3xl font-bold">
-                C
-              </div>
-              <div className="absolute inset-0 w-28 h-28 rounded-full border-4 border-primary-foreground/30 animate-spin" style={{ borderTopColor: 'transparent', animationDuration: '1.5s' }} />
-            </div>
-            <h1 className="text-senior-2xl font-bold mb-6">Connecting...</h1>
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-senior-base">Setting up your session</span>
-            </div>
-          </motion.div>
-        )}
 
         {/* ACTIVE CALL */}
         {callState === 'active' && (
