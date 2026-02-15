@@ -78,18 +78,39 @@ const CheckIn = () => {
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
 
+  // Full state reset function
+  const resetCallState = useCallback(() => {
+    clearInterval(timerRef.current);
+    clearInterval(vadIntervalRef.current);
+    if (mediaRecorderRef.current?.state !== 'inactive') {
+      mediaRecorderRef.current?.stop();
+    }
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    audioContextRef.current?.close();
+
+    mediaRecorderRef.current = null;
+    streamRef.current = null;
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    audioRef.current = null;
+    isRecordingRef.current = false;
+    isSpeakingRef.current = false;
+    silenceStartRef.current = null;
+
+    setElapsed(0);
+    setCallStart(null);
+    setTranscripts([]);
+    setConversationHistory([]);
+    setIsProcessing(false);
+    setIsPlaying(false);
+    setMicStatus('listening');
+    setTextInput('');
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      clearInterval(timerRef.current);
-      clearInterval(vadIntervalRef.current);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      audioContextRef.current?.close();
-    };
-  }, []);
+    return () => resetCallState();
+  }, [resetCallState]);
 
   // Auto-scroll transcripts
   useEffect(() => {
@@ -119,12 +140,14 @@ const CheckIn = () => {
     return () => clearInterval(timerRef.current);
   }, [callState, callStart]);
 
-  // Update micStatus based on state
+  // Update micStatus based on state — ensure VAD resumes after Clara speaks
   useEffect(() => {
     if (isPlaying) {
       setMicStatus('clara-speaking');
     } else if (isProcessing) {
       setMicStatus('processing');
+    } else {
+      setMicStatus('listening');
     }
   }, [isPlaying, isProcessing]);
 
@@ -135,16 +158,7 @@ const CheckIn = () => {
   };
 
   const handleEndCall = () => {
-    clearInterval(timerRef.current);
-    clearInterval(vadIntervalRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    audioContextRef.current?.close();
-    setIsPlaying(false);
-
-    // Pre-fill summary with transcript
+    // Pre-fill summary with transcript before reset
     if (transcripts.length > 0) {
       const transcriptText = transcripts
         .map(t => {
@@ -156,6 +170,8 @@ const CheckIn = () => {
       setSummary(transcriptText);
     }
 
+    // Clean up all refs and streams
+    resetCallState();
     setCallState('summary');
   };
 
@@ -298,8 +314,8 @@ const CheckIn = () => {
       // Start VAD monitoring
       startVADMonitoring();
 
-      // Send an initial greeting by calling the LLM with a "start" message
-      await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx);
+      // Send an initial greeting — pass empty history to avoid stale state race condition
+      await sendToVoiceChat('Hello Clara, I\'m ready for my check-in.', ctx, []);
     } catch (err: any) {
       console.error('Failed to start voice session:', err);
       setCallState('incoming');
@@ -311,14 +327,15 @@ const CheckIn = () => {
     }
   };
 
-  const sendToVoiceChat = async (text: string, ctx?: typeof patientContext) => {
+  const sendToVoiceChat = async (text: string, ctx?: typeof patientContext, historyOverride?: { role: 'user' | 'assistant'; content: string }[]) => {
     const context = ctx || patientContext;
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-    // Add user message to transcript & history
+    // Add user message to transcript & history — use override if provided (avoids stale state)
+    const history = historyOverride ?? conversationHistory;
     const newUserMsg = { role: 'user' as const, content: text };
-    const updatedHistory = [...conversationHistory, newUserMsg];
+    const updatedHistory = [...history, newUserMsg];
     setConversationHistory(updatedHistory);
     setTranscripts(prev => [...prev, { text, timestamp: Date.now(), sender: 'user' }]);
 
@@ -454,10 +471,14 @@ const CheckIn = () => {
         setIsPlaying(false);
       };
       audio.src = url;
-      audio.play().catch(() => {
-        URL.revokeObjectURL(url);
-        setIsPlaying(false);
-      });
+      // Small delay to let browser load blob URL
+      setTimeout(() => {
+        audio.play().catch((err) => {
+          console.error('[CheckIn] Audio play() failed:', err);
+          URL.revokeObjectURL(url);
+          setIsPlaying(false);
+        });
+      }, 50);
     } catch (err) {
       console.error('[CheckIn] Audio playback error:', err);
       setIsPlaying(false);
@@ -771,6 +792,13 @@ const CheckIn = () => {
                   <Save className="h-4 w-4" /> {saving ? 'Saving...' : 'Save Check-in'}
                 </Button>
               </div>
+              <Button
+                variant="outline"
+                onClick={() => { resetCallState(); setCallState('incoming'); }}
+                className="w-full h-12 gap-2"
+              >
+                <Phone className="h-4 w-4" /> New Call
+              </Button>
             </div>
           </motion.div>
         )}
