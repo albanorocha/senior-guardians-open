@@ -512,17 +512,32 @@ const CheckIn = () => {
     if (data.extractedData) {
       for (const item of data.extractedData) {
         if (item.tool === 'report_medication_status') {
-          const med = medicationsRef.current.find(m => {
-            const dbName = m.name.toLowerCase();
-            const aiName = (item.args.medication_name || '').toLowerCase();
-            return dbName.includes(aiName) || aiName.includes(dbName);
-          });
-          if (med) {
-            setResponses(r => ({
-              ...r,
-              [med.id]: { taken: item.args.taken, issues: item.args.side_effects || '' }
-            }));
-            toast({ title: `${med.name}: ${item.args.taken ? '✅ Taken' : '❌ Not taken'}` });
+          const aiName = (item.args.medication_name || '').toLowerCase();
+          
+          // Fallback: if LLM says "all medications" / "all pills" etc., mark everything
+          if (aiName.includes('all') || aiName.includes('unspecified')) {
+            medicationsRef.current.forEach(med => {
+              setResponses(r => ({
+                ...r,
+                [med.id]: { taken: item.args.taken, issues: item.args.side_effects || '' }
+              }));
+            });
+            toast({ title: `All medications: ${item.args.taken ? '✅ Taken' : '❌ Not taken'}` });
+          } else {
+            // Normal bidirectional fuzzy matching
+            const med = medicationsRef.current.find(m => {
+              const dbName = m.name.toLowerCase();
+              return dbName.includes(aiName) || aiName.includes(dbName);
+            });
+            if (med) {
+              setResponses(r => ({
+                ...r,
+                [med.id]: { taken: item.args.taken, issues: item.args.side_effects || '' }
+              }));
+              toast({ title: `${med.name}: ${item.args.taken ? '✅ Taken' : '❌ Not taken'}` });
+            } else {
+              console.warn('[CheckIn] No medication match for:', item.args.medication_name, '— available:', medicationsRef.current.map(m => m.name));
+            }
           }
         }
         if (item.tool === 'report_mood') {
