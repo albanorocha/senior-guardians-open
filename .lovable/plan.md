@@ -1,75 +1,49 @@
 
+# Criar Página de Teste TTS
 
-# Fix Clara's Audio: Manual PCM Decoding
+## Objetivo
 
-## Root Cause
+Criar uma página isolada `/tts-test` para testar apenas a conversão de texto em áudio, sem depender do fluxo completo de check-in. Isso vai ajudar a identificar se o problema é na API TTS, na conversão base64, ou no playback.
 
-The console shows:
+## O que será criado
+
+### 1. Nova edge function `tts-test/index.ts`
+
+Uma função simplificada que recebe apenas texto e retorna o áudio base64. Chama somente o TTS (Lightning v3.1), sem STT nem LLM. Também retornará metadados do áudio (tamanho em bytes, primeiros bytes do header) para debug.
+
+### 2. Nova página `src/pages/TtsTest.tsx`
+
+Página simples com:
+- Campo de texto para digitar a frase
+- Botão "Gerar Áudio"
+- Painel de debug mostrando:
+  - Tamanho do base64 recebido
+  - Primeiros bytes do WAV header (RIFF signature, sample rate, bits per sample)
+  - Status de cada etapa do playback
+- Três métodos de playback lado a lado para comparar:
+  1. **Método A** -- `<audio>` tag com data URL (`data:audio/wav;base64,...`)
+  2. **Método B** -- `<audio>` tag com Blob URL
+  3. **Método C** -- Manual PCM decode (o método atual)
+- Cada método mostra se funcionou ou o erro
+
+### 3. Rota em `src/App.tsx`
+
+Adicionar rota `/tts-test` (sem proteção, para facilitar o teste).
+
+## Detalhes Técnicos
+
+### Edge function `tts-test`
+
 ```
-EncodingError: Unable to decode audio data
-```
-
-Both the HTML `<audio>` element AND `AudioContext.decodeAudioData()` fail to decode the TTS audio. The Lightning v3.1 API returns 24kHz, 16-bit mono PCM WAV. The browser sandbox environment's decoders don't support this specific format.
-
-## Solution
-
-Manually parse the WAV file: skip the 44-byte RIFF header, read the raw 16-bit PCM samples into a Float32Array, and create an AudioBuffer at the correct sample rate. This bypasses all browser codec limitations.
-
-## Changes
-
-### `src/pages/CheckIn.tsx` -- Replace `playAudio` function
-
-Replace the current `playAudio` with a manual PCM decoder:
-
-```typescript
-const playAudio = async (base64: string) => {
-  setIsPlaying(true);
-  try {
-    const binaryStr = atob(base64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    // Parse WAV header to get sample rate and data offset
-    const view = new DataView(bytes.buffer);
-    const sampleRate = view.getUint32(24, true);  // offset 24 in WAV header
-    const bitsPerSample = view.getUint16(34, true); // offset 34
-    const dataOffset = 44; // standard WAV header size
-    const bytesPerSample = bitsPerSample / 8;
-    const numSamples = (bytes.length - dataOffset) / bytesPerSample;
-
-    // Convert 16-bit PCM to Float32
-    const float32 = new Float32Array(numSamples);
-    for (let i = 0; i < numSamples; i++) {
-      const sample = view.getInt16(dataOffset + i * 2, true);
-      float32[i] = sample / 32768;
-    }
-
-    // Create AudioBuffer and play
-    const playbackCtx = new AudioContext();
-    const audioBuffer = playbackCtx.createBuffer(1, numSamples, sampleRate);
-    audioBuffer.getChannelData(0).set(float32);
-    const source = playbackCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(playbackCtx.destination);
-    source.onended = () => {
-      setIsPlaying(false);
-      playbackCtx.close();
-    };
-    source.start(0);
-  } catch (err) {
-    console.error('[CheckIn] Audio playback error:', err);
-    setIsPlaying(false);
-  }
-};
+POST /tts-test
+Body: { "text": "Olá, como você está?" }
+Response: { 
+  "audioBase64": "...", 
+  "audioSizeBytes": 48044,
+  "headerBytes": "52494646..." (primeiros 44 bytes em hex)
+}
 ```
 
-### Why this works
+### Página de teste
 
-- No dependency on browser codec support at all
-- Reads the sample rate (24000) directly from the WAV header
-- Converts 16-bit signed integer PCM samples to Float32 (the format AudioBuffer expects)
-- Creates a buffer at the native sample rate, so no resampling artifacts
-- Works in every browser that supports Web Audio API (all modern browsers)
-
+A página testará os 3 métodos de playback e mostrará logs visuais na tela para cada um, facilitando o diagnóstico do problema sem precisar abrir o console.
