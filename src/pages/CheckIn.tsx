@@ -457,9 +457,25 @@ const CheckIn = () => {
         bytes[i] = binaryStr.charCodeAt(i);
       }
 
-      // Use Web Audio API which supports more formats (including 24kHz WAV)
+      // Parse WAV header to get sample rate and data offset
+      const view = new DataView(bytes.buffer);
+      const sampleRate = view.getUint32(24, true);  // offset 24 in WAV header
+      const bitsPerSample = view.getUint16(34, true); // offset 34
+      const dataOffset = 44; // standard WAV header size
+      const bytesPerSample = bitsPerSample / 8;
+      const numSamples = (bytes.length - dataOffset) / bytesPerSample;
+
+      // Convert 16-bit PCM to Float32
+      const float32 = new Float32Array(numSamples);
+      for (let i = 0; i < numSamples; i++) {
+        const sample = view.getInt16(dataOffset + i * 2, true);
+        float32[i] = sample / 32768;
+      }
+
+      // Create AudioBuffer and play
       const playbackCtx = new AudioContext();
-      const audioBuffer = await playbackCtx.decodeAudioData(bytes.buffer.slice(0));
+      const audioBuffer = playbackCtx.createBuffer(1, numSamples, sampleRate);
+      audioBuffer.getChannelData(0).set(float32);
       const source = playbackCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(playbackCtx.destination);
