@@ -1,74 +1,61 @@
 
 
-# Adicionar Logs Detalhados para Debug do Pre Call API
+# Abordagem Alternativa: Passar Variaveis Diretamente no Webcall
 
-## Problema Atual
+## Problema
 
-Os logs mostram que a funcao `atoms-precall` **foi chamada** pelo Atoms (recebeu body `{}`) e **retornou as variaveis corretamente**. Isso significa que a integracao tecnica esta funcionando. O problema provavel e a **configuracao de mapeamento de variaveis** no dashboard do Atoms.
+A abordagem atual usa um webhook (Pre Call API) que o Atoms deveria chamar antes da conversa para buscar as variaveis do paciente. Os logs mostram que o `atoms-precall` **nao esta sendo chamado pelo Atoms** -- so aparece um evento de "shutdown", sem nenhuma requisicao real. Isso significa que a configuracao no dashboard do Atoms nao esta funcionando corretamente.
 
-## O que sera feito
+## Nova Abordagem
 
-### 1. Adicionar logs detalhados no frontend (CheckIn.tsx)
+Em vez de depender do webhook Pre Call API (que requer configuracao manual no dashboard do Atoms), vamos **enviar as variaveis diretamente na chamada de criacao do webcall**. A API do Atoms aceita um campo `variables` no body da requisicao, assim como a API de outbound call.
 
-- Logar as variaveis enviadas para `atoms-session`
-- Logar a resposta completa do `atoms-session`
-- Logar erros com detalhes completos
+Isso elimina completamente a necessidade do webhook `atoms-precall` e da tabela `pre_call_context`.
 
-### 2. Adicionar logs detalhados no `atoms-session`
+## O que muda
 
-- Logar o body completo recebido do frontend
-- Logar a resposta completa da API do Atoms (webcall)
-- Logar o status HTTP da resposta do Atoms
+### 1. Edge Function `atoms-session`
 
-### 3. Adicionar logs detalhados e headers no `atoms-precall`
+Atualmente envia apenas `{ agentId }` para a API do Atoms:
+```text
+{ "agentId": "6990ef650d1c87f0c9a42402" }
+```
 
-- Logar todos os headers recebidos (para entender como o Atoms chama)
-- Logar o metodo HTTP usado
-- Logar a URL completa
-- Logar a query completa ao banco
+Sera alterado para incluir as variaveis diretamente:
+```text
+{ "agentId": "6990ef650d1c87f0c9a42402", "variables": { "patient_name": "Albano", ... } }
+```
 
-### 4. Verificacao de configuracao no Atoms
+- Remover o codigo que salva contexto na tabela `pre_call_context`
+- Passar as variaveis recebidas do frontend diretamente no body do webcall
 
-Apos os logs, voce precisa verificar no dashboard do Atoms:
+### 2. Nenhuma alteracao no frontend
 
-1. Na configuracao do Pre Call API, alem da URL, **e necessario mapear as variaveis da resposta**
-2. Cada variavel do agente (ex: `patient_name`) precisa ser mapeada para o campo correspondente na resposta da API
-3. Exemplo de mapeamento:
-   - Variavel `patient_name` -> Path: `$.variables.patient_name`
-   - Variavel `medications` -> Path: `$.variables.medications`
-   - Variavel `current_date` -> Path: `$.variables.current_date`
-   - Variavel `current_time` -> Path: `$.variables.current_time`
-   - Variavel `patient_age` -> Path: `$.variables.patient_age`
+O `CheckIn.tsx` ja envia as variaveis corretamente para o `atoms-session`. Nada muda no frontend.
+
+### 3. Edge Function `atoms-precall`
+
+Pode ser mantida como fallback, mas nao sera mais necessaria para o fluxo principal. A configuracao no dashboard do Atoms pode ser removida.
 
 ## Detalhes Tecnicos
 
-### Arquivos modificados
+### Arquivo modificado
 
-- **`src/pages/CheckIn.tsx`** - Adicionar `console.log` antes e depois da chamada ao `atoms-session`
-- **`supabase/functions/atoms-session/index.ts`** - Logar body recebido, resposta completa do Atoms API, e status
-- **`supabase/functions/atoms-precall/index.ts`** - Logar headers, metodo, e detalhes da query ao banco
+- **`supabase/functions/atoms-session/index.ts`** -- Alterar o body enviado para a API `webcall` do Atoms para incluir o campo `variables`
 
-### Exemplo de logs que serao adicionados
-
-**Frontend:**
-```text
-[CheckIn] Variables: { patient_name: "Albano", ... }
-[CheckIn] atoms-session response: { data: { token: "...", host: "..." } }
+### Antes (linha relevante):
+```javascript
+const webcallBody = JSON.stringify({ agentId });
 ```
 
-**atoms-session:**
-```text
-[atoms-session] Received body: { agentId: "...", variables: {...}, userId: "..." }
-[atoms-session] Atoms API response status: 200
-[atoms-session] Atoms API response body: { data: { token: "...", host: "..." } }
+### Depois:
+```javascript
+const webcallBody = JSON.stringify({ agentId, variables });
 ```
 
-**atoms-precall:**
-```text
-[atoms-precall] Method: POST
-[atoms-precall] Headers: { apikey: "...", content-type: "..." }
-[atoms-precall] Received body: {}
-[atoms-precall] DB query result: { variables: { patient_name: "Albano", ... } }
-[atoms-precall] Returning: { variables: { patient_name: "Albano", ... } }
-```
+Onde `variables` sao as variaveis ja recebidas do frontend (patient_name, medications, etc.).
+
+### Deploy
+- Redeployar apenas `atoms-session`
+- Nao e necessario nenhuma configuracao adicional no dashboard do Atoms
 
