@@ -39,14 +39,19 @@ serve(async (req) => {
     } else {
       console.log('[voice-chat] Step 1: Transcribing audio with Pulse STT...');
       const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+      console.log('[voice-chat] Audio bytes length:', audioBytes.length);
+
+      // Send as multipart form-data with a file — Pulse requires a proper audio file
+      const formData = new FormData();
+      const audioBlob = new Blob([audioBytes], { type: 'audio/webm' });
+      formData.append('file', audioBlob, 'recording.webm');
 
       const sttRes = await fetch('https://waves-api.smallest.ai/api/v1/pulse/get_text?model=pulse&language=en', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${SMALLEST_AI_API_KEY}`,
-          'Content-Type': 'audio/webm',
         },
-        body: audioBytes,
+        body: formData,
       });
 
       if (!sttRes.ok) {
@@ -145,9 +150,10 @@ Always address the patient by name. Never use markdown or formatting — speak n
       },
       body: JSON.stringify({
         text: agentText,
-        voice_id: 'emily',
+        voice_id: 'sophia',
         sample_rate: 24000,
         speed: 1,
+        add_wav_header: true,
       }),
     });
 
