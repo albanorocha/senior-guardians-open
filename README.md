@@ -16,6 +16,7 @@
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **Backend:** Lovable Cloud (Supabase), Edge Functions
 - **AI:** Voice chat and TTS integration
+- **Built with:** Lovable + Antigravity
 - **Animations:** Framer Motion
 
 ## Getting Started
