@@ -12,6 +12,7 @@ import { Progress } from '@/components/ui/progress';
 import { Phone, Pill, CheckCircle, Circle, XCircle, ChevronRight, AlertTriangle, Bell, Clock, Activity } from 'lucide-react';
 import { format, subDays, startOfDay } from 'date-fns';
 import { motion } from 'framer-motion';
+import NextDoseCard from '@/components/NextDoseCard';
 
 const moodEmoji: Record<string, string> = {
   happy: '😊', neutral: '😐', confused: '😕', distressed: '😟',
@@ -76,7 +77,7 @@ const Dashboard = () => {
       if (recentCheckIns && recentCheckIns.length > 0) {
         const ciIds = recentCheckIns.map(c => c.id);
         const { data: allResponses } = await supabase.from('check_in_responses').select('check_in_id, taken').in('check_in_id', ciIds);
-        
+
         // Group by check_in_id, count compliant days
         const grouped: Record<string, boolean[]> = {};
         allResponses?.forEach(r => {
@@ -186,26 +187,11 @@ const Dashboard = () => {
           </motion.div>
         )}
 
-        {/* Talk to Clara CTA */}
+        {/* Unified Next Dose / Simulate Call Card */}
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}>
-          <Link to="/check-in">
-            <Card className="bg-primary text-primary-foreground shadow-soft-lg hover:shadow-lg transition-shadow cursor-pointer border-0">
-              <CardContent className="flex items-center gap-5 py-8 px-6">
-                <div className="relative">
-                  <div className="w-16 h-16 rounded-full bg-primary-foreground/20 flex items-center justify-center">
-                    <Phone className="h-8 w-8" />
-                  </div>
-                  <div className="absolute inset-0 w-16 h-16 rounded-full bg-primary-foreground/10 animate-pulse-ring" />
-                </div>
-                <div className="flex-1">
-                  <h2 className="text-senior-xl font-bold">Talk to Clara</h2>
-                  <p className="text-senior-base opacity-90">Your daily medication check-in</p>
-                </div>
-                <ChevronRight className="h-6 w-6 opacity-70" />
-              </CardContent>
-            </Card>
-          </Link>
+          <NextDoseCard medications={medications} todayMedStatus={todayMedStatus} />
         </motion.div>
+
 
         {/* Adherence Stats */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>

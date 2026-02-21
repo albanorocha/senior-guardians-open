@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { History as HistoryIcon, ChevronDown, Clock, AlertTriangle, Bell, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 const moodEmoji: Record<string, string> = {
   happy: '😊', neutral: '😐', confused: '😕', distressed: '😟',
@@ -67,6 +68,20 @@ const History = () => {
     return `${m}m ${sec}s`;
   };
 
+  const moodChartData = [...checkIns]
+    .filter(c => c.mood_detected)
+    .slice(0, 10)
+    .reverse()
+    .map(c => {
+      const score = { distressed: 1, confused: 2, neutral: 3, happy: 4 }[c.mood_detected] || 3;
+      return {
+        date: format(new Date(c.scheduled_at), 'MMM d'),
+        mood: c.mood_detected,
+        score,
+        emoji: moodEmoji[c.mood_detected] || '😐'
+      };
+    });
+
   if (loading) {
     return (<><AppNav /><main className="container max-w-2xl py-8 px-4 space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></main></>);
   }
@@ -78,6 +93,42 @@ const History = () => {
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-senior-2xl font-bold flex items-center gap-2">
           <HistoryIcon className="h-7 w-7 text-primary" /> Check-in History
         </motion.h1>
+
+        {moodChartData.length > 1 && (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
+            <Card className="shadow-soft mb-2 border-0 bg-gradient-to-br from-card to-muted/20">
+              <CardContent className="pt-6">
+                <p className="text-senior-sm font-semibold mb-4 text-muted-foreground flex items-center gap-2">
+                  📊 Mood Trend (Last Check-ins)
+                </p>
+                <div className="h-[200px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={moodChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                      <XAxis dataKey="date" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                      <YAxis domain={[1, 4]} ticks={[1, 2, 3, 4]} tickFormatter={(val) => {
+                        return val === 1 ? '😟' : val === 2 ? '😕' : val === 3 ? '😐' : '😊';
+                      }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="bg-background border rounded-lg shadow-soft p-2 text-sm text-center">
+                                <p className="font-semibold text-muted-foreground">{payload[0].payload.date}</p>
+                                <p className="text-3xl mt-1">{payload[0].payload.emoji}</p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Line type="monotone" dataKey="score" stroke="hsl(var(--primary))" strokeWidth={4} dot={{ r: 6, fill: "hsl(var(--primary))", strokeWidth: 3, stroke: "hsl(var(--background))" }} activeDot={{ r: 8 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {checkIns.length === 0 ? (
           <Card className="shadow-soft">
@@ -129,7 +180,7 @@ const History = () => {
                               <p className="text-sm leading-relaxed">{ci.summary}</p>
                             </div>
                           )}
-                          
+
                           {/* Medication responses */}
                           {responses[ci.id]?.map((r: any) => (
                             <div key={r.id} className="flex items-center justify-between text-sm py-1">

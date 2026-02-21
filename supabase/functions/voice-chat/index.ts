@@ -327,7 +327,7 @@ Other tools:
     if (!llmRes.ok) {
       const errText = await llmRes.text();
       console.error('[voice-chat] LLM error:', llmRes.status, errText);
-      
+
       if (llmRes.status === 429) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please wait a moment and try again.' }), {
           status: 429,
@@ -349,7 +349,7 @@ Other tools:
 
     const llmData = await llmRes.json();
     const firstChoice = llmData.choices?.[0]?.message;
-    
+
     let agentText = firstChoice?.content || '';
     const extractedData: { tool: string; args: any }[] = [];
 
@@ -367,7 +367,7 @@ Other tools:
           console.error('[voice-chat] Failed to parse tool args:', toolCall.function?.arguments);
           continue;
         }
-        
+
         console.log(`[voice-chat] Tool call: ${fnName}`, fnArgs);
         extractedData.push({ tool: fnName, args: fnArgs });
       }
@@ -439,16 +439,13 @@ Other tools:
     }
 
     const ttsArrayBuffer = await ttsRes.arrayBuffer();
+
+    // Faster Base64 conversion in Deno
     const ttsBytes = new Uint8Array(ttsArrayBuffer);
-    
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < ttsBytes.length; i += chunkSize) {
-      const chunk = ttsBytes.subarray(i, i + chunkSize);
-      binary += String.fromCharCode(...chunk);
-    }
-    const responseAudioBase64 = btoa(binary);
-    
+    const responseAudioBase64 = btoa(
+      Array.from(ttsBytes).map((byte) => String.fromCharCode(byte)).join('')
+    );
+
     console.log('[voice-chat] TTS audio size:', ttsBytes.length, 'bytes');
 
     return new Response(JSON.stringify({

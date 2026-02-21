@@ -31,10 +31,10 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
 ];
 
 const SILENCE_THRESHOLD = 20;
-const SILENCE_TIMEOUT_MS = 1000;
+const SILENCE_TIMEOUT_MS = 600;
 const VAD_CHECK_INTERVAL_MS = 100;
 const MIN_BLOB_SIZE = 5000;
-const MIN_RECORDING_DURATION_MS = 1000;
+const MIN_RECORDING_DURATION_MS = 500;
 
 const CheckIn = () => {
   const { user } = useAuth();
@@ -73,7 +73,7 @@ const CheckIn = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -107,7 +107,7 @@ const CheckIn = () => {
     streamRef.current = null;
     audioContextRef.current = null;
     analyserRef.current = null;
-    
+
     isRecordingRef.current = false;
     isSpeakingRef.current = false;
     silenceStartRef.current = null;
@@ -183,7 +183,7 @@ const CheckIn = () => {
       stopped = true;
       if (ringInterval) clearInterval(ringInterval);
       if (audioCtx) {
-        audioCtx.close().catch(() => {});
+        audioCtx.close().catch(() => { });
       }
     };
   }, [callState]);
@@ -524,7 +524,7 @@ const CheckIn = () => {
       for (const item of data.extractedData) {
         if (item.tool === 'report_medication_status') {
           const aiName = (item.args.medication_name || '').toLowerCase();
-          
+
           // Fallback: if LLM says "all medications" / "all pills" etc., mark everything
           if (aiName.includes('all') || aiName.includes('unspecified')) {
             medicationsRef.current.forEach(med => {
@@ -707,12 +707,12 @@ const CheckIn = () => {
 
   // Audio visualizer bars
   const AudioVisualizer = () => (
-    <div className="flex items-end gap-1 h-8">
-      {[0, 1, 2, 3, 4, 5, 6].map(i => (
+    <div className="flex items-end gap-2 h-16 pt-4 mb-2">
+      {[0, 1, 2, 3, 4, 5, 6, 7].map(i => (
         <div
           key={i}
-          className="w-1 bg-primary-foreground/80 rounded-full animate-audio-bar"
-          style={{ animationDelay: `${i * 0.1}s`, height: '8px' }}
+          className="w-2.5 bg-primary-foreground/90 rounded-full animate-audio-bar origin-bottom transform scale-y-[1.5]"
+          style={{ animationDelay: `${i * 0.15}s`, height: '12px' }}
         />
       ))}
     </div>
@@ -741,17 +741,17 @@ const CheckIn = () => {
                 onClick={() => navigate('/dashboard')}
                 variant="destructive"
                 size="lg"
-                className="w-16 h-16 rounded-full p-0"
+                className="w-20 h-20 rounded-full p-0 shadow-lg hover:scale-105 transition-transform"
               >
-                <X className="h-7 w-7" />
+                <X className="h-10 w-10" />
               </Button>
               <Button
                 onClick={handleAnswer}
                 size="lg"
                 disabled={connecting}
-                className="w-16 h-16 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground"
+                className="w-20 h-20 rounded-full p-0 bg-success hover:bg-success/90 text-success-foreground shadow-lg hover:scale-105 transition-transform"
               >
-                {connecting ? <Loader2 className="h-7 w-7 animate-spin" /> : <Phone className="h-7 w-7" />}
+                {connecting ? <Loader2 className="h-10 w-10 animate-spin" /> : <Phone className="h-10 w-10" />}
               </Button>
             </div>
           </motion.div>
@@ -761,14 +761,14 @@ const CheckIn = () => {
         {/* ACTIVE CALL */}
         {callState === 'active' && (
           <motion.div key="active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center min-h-screen px-4 pt-8 pb-4 text-primary-foreground">
-            <div className="relative w-20 h-20 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-2xl font-bold mb-2">
+            <div className="relative w-32 h-32 rounded-full bg-primary-foreground/20 flex items-center justify-center text-senior-3xl font-bold mb-4 shadow-soft">
               C
               {isPlaying && (
-                <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-primary-foreground/50 animate-pulse" />
+                <div className="absolute inset-0 w-32 h-32 rounded-full border-4 border-primary-foreground/50 animate-pulse" />
               )}
             </div>
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-senior-lg font-bold">Clara</h2>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-senior-xl font-bold">Clara</h2>
             </div>
             {isPlaying ? (
               <AudioVisualizer />
@@ -787,11 +787,10 @@ const CheckIn = () => {
                       initial={{ opacity: 0, y: -10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border backdrop-blur-sm ${
-                        alert.type === 'emergency'
-                          ? 'border-red-400/60 bg-red-500/20 text-red-100'
-                          : 'border-blue-400/60 bg-blue-500/20 text-blue-100'
-                      }`}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border backdrop-blur-sm ${alert.type === 'emergency'
+                        ? 'border-red-400/60 bg-red-500/20 text-red-100'
+                        : 'border-blue-400/60 bg-blue-500/20 text-blue-100'
+                        }`}
                     >
                       {alert.type === 'emergency' ? (
                         <AlertTriangle className="h-4 w-4 shrink-0 text-red-300" />
@@ -823,11 +822,10 @@ const CheckIn = () => {
                 )}
                 {transcripts.map((t, i) => (
                   <div key={i} className={`flex flex-col ${t.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`px-3 py-2 max-w-[90%] ${
-                      t.sender === 'user'
-                        ? 'bg-white/25 rounded-lg rounded-br-none'
-                        : 'bg-accent/30 rounded-lg rounded-bl-none border-l-2 border-secondary'
-                    }`}>
+                    <div className={`px-3 py-2 max-w-[90%] ${t.sender === 'user'
+                      ? 'bg-white/25 rounded-lg rounded-br-none'
+                      : 'bg-accent/30 rounded-lg rounded-bl-none border-l-2 border-secondary'
+                      }`}>
                       {t.sender === 'agent' && (
                         <p className="text-xs font-semibold text-secondary mb-0.5">Clara</p>
                       )}
@@ -876,29 +874,28 @@ const CheckIn = () => {
               <div className="flex items-center gap-6">
                 {/* Mic status indicator */}
                 <div className="relative flex items-center justify-center">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
-                    micStatus === 'speaking'
-                      ? 'bg-secondary'
-                      : micStatus === 'listening'
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${micStatus === 'speaking'
+                    ? 'bg-secondary'
+                    : micStatus === 'listening'
                       ? 'bg-secondary/80'
                       : micStatus === 'clara-speaking'
-                      ? 'bg-accent/60'
-                      : 'bg-primary-foreground/10'
-                  }`}>
+                        ? 'bg-accent/60'
+                        : 'bg-primary-foreground/10'
+                    }`}>
                     {micStatus === 'processing' ? (
-                      <Loader2 className="h-7 w-7 animate-spin" />
+                      <Loader2 className="h-10 w-10 animate-spin" />
                     ) : (
-                      <Mic className="h-7 w-7" />
+                      <Mic className="h-10 w-10" />
                     )}
                   </div>
                   {micStatus === 'speaking' && (
                     <>
-                      <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-secondary/60 animate-ping" />
-                      <div className="absolute -inset-2 w-20 h-20 rounded-full border border-secondary/30 animate-pulse" />
+                      <div className="absolute inset-0 w-20 h-20 rounded-full border-4 border-secondary/60 animate-ping" />
+                      <div className="absolute -inset-2 w-24 h-24 rounded-full border border-secondary/30 animate-pulse" />
                     </>
                   )}
                   {micStatus === 'listening' && (
-                    <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-primary-foreground/30 animate-pulse" />
+                    <div className="absolute inset-0 w-20 h-20 rounded-full border-4 border-primary-foreground/30 animate-pulse" />
                   )}
                 </div>
 
@@ -907,9 +904,9 @@ const CheckIn = () => {
                   onClick={handleEndCall}
                   variant="destructive"
                   size="lg"
-                  className="w-16 h-16 rounded-full p-0"
+                  className="w-20 h-20 rounded-full p-0 shadow-lg hover:scale-105 transition-transform"
                 >
-                  <PhoneOff className="h-7 w-7" />
+                  <PhoneOff className="h-10 w-10" />
                 </Button>
               </div>
               <p className="text-xs opacity-60">

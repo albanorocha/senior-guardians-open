@@ -24,6 +24,19 @@ interface MedForm {
   instructions: string;
 }
 
+const colors = ['bg-blue-500', 'bg-rose-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-indigo-500'];
+const shapes = ['rounded-full w-8 h-8', 'rounded-md w-8 h-8', 'rounded-[12px] w-10 h-5']; // circle, square, pill
+
+export const getMedicationStyle = (name: string = '') => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const color = colors[Math.abs(hash) % colors.length];
+  const shapeClass = shapes[Math.abs(hash >> 3) % shapes.length];
+  return { color, shapeClass };
+};
+
 const emptyForm: MedForm = { name: '', dosage: '', frequency: 'once daily', time_slots: '08:00', instructions: '' };
 
 const Medications = () => {
@@ -155,12 +168,18 @@ const Medications = () => {
               <motion.div key={med.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
                 <Card className={`shadow-soft ${!med.active ? 'opacity-60' : ''}`}>
                   <CardContent className="flex items-center gap-4 py-4">
+                    <div className="shrink-0 flex items-center justify-center w-14 h-14 bg-background border rounded-xl shadow-inner">
+                      <div className={`shadow-sm border border-black/10 ${getMedicationStyle(med.name).color} ${getMedicationStyle(med.name).shapeClass}`} />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-senior-base font-semibold">{med.name}</p>
                       <p className="text-senior-sm text-muted-foreground">{med.dosage} · {med.frequency} · {med.time_slots?.join(', ')}</p>
                       {med.instructions && <p className="text-sm text-muted-foreground italic mt-1">{med.instructions}</p>}
                     </div>
-                    <Switch checked={med.active} onCheckedChange={() => toggleActive(med.id, med.active)} />
+                    <div className="flex flex-col items-center gap-1 mx-2">
+                      <Switch checked={med.active} onCheckedChange={() => toggleActive(med.id, med.active)} />
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">{med.active ? 'On' : 'Off'}</span>
+                    </div>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(med)}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" onClick={() => handleDelete(med.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                   </CardContent>
