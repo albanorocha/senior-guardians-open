@@ -48,10 +48,16 @@ Follow these steps to set up the project locally.
      ```
    - Open `.env` and fill in your Supabase credentials (you can find these in your Supabase project settings under API):
      ```env
+     # Frontend (Supabase Client)
      VITE_SUPABASE_PROJECT_ID="your-project-id"
      VITE_SUPABASE_PUBLISHABLE_KEY="your-anon-key"
      VITE_SUPABASE_URL="https://your-project-id.supabase.co"
+
+     # Backend (Edge Functions)
+     SMALLEST_AI_API_KEY="your-smallest-ai-key"
+     LOVABLE_API_KEY="your-lovable-api-key"
      ```
+   - **Note:** The backend keys (`SMALLEST_AI_API_KEY`, `LOVABLE_API_KEY`) are used exclusively within Supabase Edge Functions and are not exposed to the frontend. For production, these must be added to your Supabase project's secrets (`supabase secrets set ...`).
 
 ### Running Locally
 
