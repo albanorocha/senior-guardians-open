@@ -61,13 +61,26 @@ Follow these steps to set up the project locally.
 
 ### Running Locally
 
-To start the development server, run:
+1. **Database Setup (Supabase CLI)**
+   If you have the [Supabase CLI](https://supabase.com/docs/guides/cli) installed, you can push the database schema simply by linking your project:
+   ```bash
+   supabase link --project-ref your-project-id
+   supabase db push
+   ```
 
-```bash
-npm run dev
-```
+2. **Deploying Edge Functions**
+   The project includes Edge Functions for AI voice features. Deploy them using:
+   ```bash
+   supabase functions deploy
+   ```
 
-Alternatively, you can use the provided script:
+3. **Start the Frontend Server**
+
+   ```bash
+   npm run dev
+   ```
+
+Alternatively, you can use the provided script to start the frontend:
 
 ```bash
 bash start.sh
