@@ -31,7 +31,7 @@ const moodOptions: { value: Mood; emoji: string; label: string }[] = [
 ];
 
 const SILENCE_THRESHOLD = 20;
-const SILENCE_TIMEOUT_MS = 600;
+const SILENCE_TIMEOUT_MS = 200;
 const VAD_CHECK_INTERVAL_MS = 100;
 const MIN_BLOB_SIZE = 5000;
 const MIN_RECORDING_DURATION_MS = 500;
