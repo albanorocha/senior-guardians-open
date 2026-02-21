@@ -14,6 +14,8 @@ import CheckIn from "./pages/CheckIn";
 import History from "./pages/History";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
+import Notifications from "./pages/Notifications";
+import LogSymptom from "./pages/LogSymptom";
 import NotFound from "./pages/NotFound";
 import TtsTest from "./pages/TtsTest";
 
@@ -32,11 +34,13 @@ const App = () => (
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Navigate to="/login" replace />} />
-              
+
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/medications" element={<ProtectedRoute><Medications /></ProtectedRoute>} />
               <Route path="/check-in" element={<ProtectedRoute><CheckIn /></ProtectedRoute>} />
               <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+              <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+              <Route path="/log-symptom" element={<ProtectedRoute><LogSymptom /></ProtectedRoute>} />
               <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
               <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               <Route path="/tts-test" element={<TtsTest />} />

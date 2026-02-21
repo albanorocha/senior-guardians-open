@@ -16,26 +16,21 @@ import {
 import ImpersonationBanner from '@/components/ImpersonationBanner';
 
 const AppNav = () => {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const { isAdmin } = useAdmin();
   const location = useLocation();
-  const navigate = useNavigate();
   const [alertCount, setAlertCount] = useState(0);
-  const [profile, setProfile] = useState<{ full_name: string; avatar_url: string | null } | null>(null);
 
   useEffect(() => {
     if (!user) return;
     supabase.from('alerts').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('acknowledged', false).then(({ count }) => {
       setAlertCount(count || 0);
     });
-    supabase.from('profiles').select('full_name, avatar_url').eq('id', user.id).single().then(({ data }) => {
-      if (data) setProfile(data as any);
-    });
   }, [user, location.pathname]);
 
   const links = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/medications', label: 'Medications', icon: Pill },
+    { to: '/dashboard', label: 'Home', icon: LayoutDashboard },
+    { to: '/medications', label: 'Meds', icon: Pill },
     { to: '/check-in', label: 'Check-in', icon: Phone },
     { to: '/history', label: 'History', icon: History },
   ];
@@ -43,66 +38,38 @@ const AppNav = () => {
   return (
     <>
       <ImpersonationBanner />
-      <nav className="border-b border-border bg-card shadow-soft">
-        <div className="container flex items-center justify-between h-16 px-4">
-          <Link to="/dashboard" className="text-senior-xl font-bold text-primary">
-            Guard<span className="text-secondary">IA</span>ns
-          </Link>
-          <div className="flex items-center gap-1">
-            {isAdmin && (
-              <Link to="/admin">
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-border bg-card/90 backdrop-blur-lg shadow-[0_-4px_20px_-10px_rgba(0,0,0,0.1)] z-50 pb-safe">
+        <div className="container max-w-2xl px-2 h-16 flex items-center justify-around">
+          {links.map(({ to, label, icon: Icon }) => {
+            const isActive = location.pathname === to;
+            return (
+              <Link key={to} to={to} className="flex-1">
                 <Button
-                  variant={location.pathname === '/admin' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="gap-2 text-senior-sm"
+                  variant="ghost"
+                  className={`w-full flex-col h-14 gap-1 rounded-xl ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-transparent'}`}
                 >
-                  <ShieldCheck className="h-4 w-4" />
-                  <span className="hidden sm:inline">Admin</span>
+                  <div className="relative">
+                    <Icon className={`h-6 w-6 transition-transform ${isActive ? 'scale-110' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
+                    {to === '/dashboard' && alertCount > 0 && (
+                      <span className="absolute -top-1 -right-2 w-3 h-3 rounded-full bg-destructive border-2 border-card" />
+                    )}
+                  </div>
+                  <span className="text-[10px] font-semibold">{label}</span>
                 </Button>
               </Link>
-            )}
-            {links.map(({ to, label, icon: Icon }) => (
-              <Link key={to} to={to}>
-                <Button
-                  variant={location.pathname === to ? 'default' : 'ghost'}
-                  size="sm"
-                  className="gap-2 text-senior-sm relative"
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden sm:inline">{label}</span>
-                  {to === '/dashboard' && alertCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center font-bold">
-                      {alertCount > 9 ? '9+' : alertCount}
-                    </span>
-                  )}
-                </Button>
-              </Link>
-            ))}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 ml-2 rounded-full hover:bg-accent px-2 py-1 transition-colors">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={profile?.avatar_url || undefined} />
-                    <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                      {profile?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="hidden sm:inline text-sm font-medium text-foreground">{profile?.full_name || 'User'}</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 bg-popover z-50">
-                <DropdownMenuItem onClick={() => navigate('/profile')} className="gap-2 cursor-pointer">
-                  <User className="h-4 w-4" />
-                  My Profile
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={signOut} className="gap-2 cursor-pointer text-destructive">
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+            )
+          })}
+          {isAdmin && (
+            <Link to="/admin" className="flex-1">
+              <Button
+                variant="ghost"
+                className={`w-full flex-col h-14 gap-1 rounded-xl ${location.pathname === '/admin' ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-transparent'}`}
+              >
+                <ShieldCheck className={`h-6 w-6 ${location.pathname === '/admin' ? 'scale-110' : ''}`} strokeWidth={location.pathname === '/admin' ? 2.5 : 2} />
+                <span className="text-[10px] font-semibold">Admin</span>
+              </Button>
+            </Link>
+          )}
         </div>
       </nav>
     </>
